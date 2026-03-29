@@ -175,7 +175,7 @@ uv run python -m py_compile server.py
 
 ## Roadmap
 
-- [x] v0.1.0 — Core tools (think, see, models, config) + auto-routing
+- [x] v0.1.0 — Core tools (think, see, models, config) + auto-routing (49 tests passing)
 - [ ] v0.2.0 — Qdrant shared memory integration (`remember` tool)
 - [ ] v0.3.0 — Benchmark-based routing, parallel inference, streaming
 - [ ] v1.0.0 — Public release, mcpservers.org listing
