@@ -25,6 +25,7 @@ class ModelInfo:
     parameter_size: str = ""
     family: str = ""
     quantization: str = ""
+    context_length: int = 0
     capabilities: list[Capability] = field(default_factory=list)
     priority: int = 0  # higher = preferred
 
@@ -32,11 +33,26 @@ class ModelInfo:
     def size_gb(self) -> float:
         return self.size_bytes / (1024**3) if self.size_bytes else 0.0
 
+    @property
+    def param_billions(self) -> float:
+        """Extract parameter count in billions from parameter_size string."""
+        if not self.parameter_size:
+            return 0.0
+        s = self.parameter_size.upper().replace(",", "")
+        try:
+            if "B" in s:
+                return float(s.replace("B", ""))
+            if "M" in s:
+                return float(s.replace("M", "")) / 1000
+        except ValueError:
+            pass
+        return 0.0
+
 
 # Pattern-based capability detection (Phase 1)
 _CAPABILITY_PATTERNS: dict[Capability, list[str]] = {
     Capability.CODE: [
-        r"coder", r"codestral", r"starcoder", r"deepseek-coder",
+        r"coder", r"codestral", r"devstral", r"starcoder", r"deepseek-coder",
         r"code-?llama", r"granite-code", r"yi-coder",
     ],
     Capability.VISION: [
@@ -59,15 +75,19 @@ _CAPABILITY_PATTERNS: dict[Capability, list[str]] = {
 # Models known to be high quality for specific tasks
 _PRIORITY_BOOST: dict[str, dict[Capability, int]] = {
     "qwen3.5": {Capability.REASONING: 10, Capability.CODE: 8},
+    "qwen3-next": {Capability.REASONING: 10, Capability.CODE: 8},
     "nemotron": {Capability.REASONING: 9},
+    "command-a": {Capability.REASONING: 8, Capability.CODE: 7},
     "qwen-coder": {Capability.CODE: 10},
     "codestral": {Capability.CODE: 9},
+    "devstral": {Capability.CODE: 9},
     "deepseek-coder": {Capability.CODE: 8},
-    "mistral-small3.2": {Capability.VISION: 10},
+    "mistral-small3.2": {Capability.VISION: 10, Capability.REASONING: 7},
     "gemma3": {Capability.VISION: 8, Capability.CREATIVE: 7},
     "moondream": {Capability.VISION: 6},
     "qwen3-embedding": {Capability.EMBEDDING: 10},
     "nomic-embed": {Capability.EMBEDDING: 8},
+    "bge": {Capability.EMBEDDING: 7},
 }
 
 
@@ -116,8 +136,13 @@ class ModelRouter:
         self._models: dict[str, ModelInfo] = {}
         self._initialized = False
 
-    async def refresh(self) -> None:
-        """Refresh model list from Ollama."""
+    async def refresh(self, *, fetch_metadata: bool = False) -> None:
+        """Refresh model list from Ollama.
+
+        Args:
+            fetch_metadata: If True, call 'ollama show' for each model to get
+                           context_length and detailed info (slower but more accurate).
+        """
         raw_models = await self.client.list_models()
         self._models.clear()
 
@@ -127,12 +152,28 @@ class ModelRouter:
             details = m.get("details", {})
 
             caps = _detect_capabilities(name)
+            ctx_len = 0
+
+            # Phase 2: fetch metadata for better routing
+            if fetch_metadata:
+                try:
+                    meta = await self.client.show_model(name)
+                    model_info = meta.get("model_info", {})
+                    # Context length from various possible keys
+                    for key in model_info:
+                        if "context_length" in key:
+                            ctx_len = model_info[key]
+                            break
+                except Exception:
+                    pass  # Metadata fetch is best-effort
+
             info = ModelInfo(
                 name=name,
                 size_bytes=size,
                 parameter_size=details.get("parameter_size", ""),
                 family=details.get("family", ""),
                 quantization=details.get("quantization_level", ""),
+                context_length=ctx_len,
                 capabilities=caps,
             )
             self._models[name] = info

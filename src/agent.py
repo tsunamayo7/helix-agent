@@ -129,7 +129,8 @@ class HelixAgent:
         if action == "status":
             return {"status": "connected", "host": self.config.ollama_host}
 
-        await self.router.refresh()
+        fetch_meta = action == "detailed"
+        await self.router.refresh(fetch_metadata=fetch_meta)
 
         if action == "capabilities":
             cap_map = await self.router.get_capabilities_map()
@@ -138,13 +139,17 @@ class HelixAgent:
         # Default: list
         models_list = []
         for info in self.router.get_all_models():
-            models_list.append({
+            entry = {
                 "name": info.name,
                 "size_gb": round(info.size_gb, 1),
                 "parameters": info.parameter_size,
+                "param_billions": info.param_billions,
                 "family": info.family,
                 "capabilities": [c.value for c in info.capabilities],
-            })
+            }
+            if info.context_length:
+                entry["context_length"] = info.context_length
+            models_list.append(entry)
         return {"models": models_list, "count": len(models_list)}
 
     async def config_action(self, action: str = "show", key: str = "", value: str = "") -> dict:

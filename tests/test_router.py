@@ -108,3 +108,23 @@ class TestModelInfo:
     def test_size_gb_zero(self):
         info = ModelInfo(name="test", size_bytes=0)
         assert info.size_gb == 0.0
+
+    def test_param_billions_from_b(self):
+        info = ModelInfo(name="test", parameter_size="27.4B")
+        assert info.param_billions == 27.4
+
+    def test_param_billions_from_m(self):
+        info = ModelInfo(name="test", parameter_size="566.70M")
+        assert abs(info.param_billions - 0.5667) < 0.001
+
+    def test_param_billions_empty(self):
+        info = ModelInfo(name="test", parameter_size="")
+        assert info.param_billions == 0.0
+
+    def test_context_length_default(self):
+        info = ModelInfo(name="test")
+        assert info.context_length == 0
+
+    def test_devstral_is_code(self):
+        caps = _detect_capabilities("devstral-2:123b")
+        assert Capability.CODE in caps
