@@ -217,8 +217,24 @@ class ModelRouter:
 
                 candidates.append((priority, name))
 
+        # Fast mode fallback: if best candidate is still huge, try any small model
+        if prefer_fast and candidates:
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            best_name = candidates[0][1]
+            best_info = self._models.get(best_name)
+            if best_info and best_info.size_gb > 30:
+                # Find any model under 20GB as fallback
+                small = [(p, n) for p, n in candidates if self._models[n].size_gb < 20]
+                if not small:
+                    # Broaden search to ALL models under 20GB
+                    for n, info in self._models.items():
+                        if info.size_gb < 20 and Capability.EMBEDDING not in info.capabilities:
+                            small.append((0, n))
+                if small:
+                    small.sort(key=lambda x: x[0], reverse=True)
+                    return small[0][1]
+
         if not candidates:
-            # Fallback: return any available model
             if self._models:
                 return next(iter(self._models))
             return None
