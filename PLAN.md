@@ -262,30 +262,43 @@ C:\Development\tools\helix-agent\
 
 ## 10. 開発ロードマップ
 
-### v0.1.0 — MVP（1-2日）
-- [ ] `think` ツール（テキスト推論、auto-routing基本版）
-- [ ] `models` ツール（一覧、能力推定）
-- [ ] `config` ツール（基本設定）
-- [ ] Ollama API クライアント
-- [ ] 名前ベース自動モデル選択
-- [ ] Claude Code settings.json 設定例
-- [ ] README.md（英語）
-- [ ] テスト 20個以上
+### v0.1.0 — MVP ✅ 完了（2026-03-29）
+- [x] `think` ツール（テキスト推論、auto-routing基本版）
+- [x] `see` ツール（Vision分析、OCR）
+- [x] `models` ツール（一覧、能力推定）
+- [x] `config` ツール（基本設定）
+- [x] Ollama API クライアント
+- [x] 名前ベース自動モデル選択
+- [x] Claude Code settings.json 登録
+- [x] README.md（英語）+ README_ja.md（日本語）
+- [x] テスト 49個パス
+- [x] GitHub公開: https://github.com/tsunamayo7/helix-agent
 
-### v0.2.0 — Vision + Memory（2-3日）
-- [ ] `see` ツール（Vision分析、OCR）
-- [ ] `remember` ツール（Qdrant統合）
-- [ ] モデルメタデータ活用ルーティング
+### v0.2.0 — Memory + メタデータルーティング
+- [ ] `remember` ツール（Qdrant mem0_shared統合）
+- [ ] モデルメタデータ活用ルーティング（ollama show → パラメータ数、量子化、コンテキスト長）
 - [ ] config.yaml によるカスタマイズ
+- [ ] VRAM使用量推定 → 同時実行可能モデル数計算
 
-### v0.3.0 — 品質強化（1週間）
-- [ ] ベンチマーク自動実行
-- [ ] 品質モード（enhance/delegate/verify）
+### v0.3.0 — OTel実測ベースルーティング
+- [ ] OpenTelemetryスパン追加（think/see呼び出しにトレース埋め込み）
+- [ ] 初回起動時ベンチマーク自動実行（全モデル × 基本タスク）
+- [ ] 実績データのローカルDB保存（SQLite）
+- [ ] 実測ベースモデル選択（推測→実測への進化）
+  - モデル × タスク種別 × 精度 × 応答速度の実績マトリクス
+  - quality=最高精度モデル、fast=実測最速モデル
+  - 使うほどルーティング精度が向上
 - [ ] 並列推論（複数モデルで同時推論→最良選択）
 - [ ] ストリーミング応答対応
+- [ ] 品質モード（enhance/delegate/verify）
+- [ ] otel-agent-trace互換のエクスポート（可視化ダッシュボード連携）
 
-### v1.0.0 — 公開
-- [ ] GitHub公開
+参考:
+- OTelマルチセッション分析: https://zenn.dev/seeda_yuto/articles/otel-multi-session-analysis
+- OTelツール: https://github.com/mii012345/otel-agent-trace
+
+### v1.0.0 — 正式公開
 - [ ] mcpservers.org 登録
 - [ ] 記事投稿（Reddit, Zenn, Dev.to, HN）
 - [ ] helix-pilot連携デモ
+- [ ] CI/CD（GitHub Actions）
