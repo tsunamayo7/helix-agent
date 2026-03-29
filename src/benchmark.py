@@ -342,8 +342,8 @@ _VALIDATORS: dict[str, callable] = {
 }
 
 
-def _adaptive_timeout(size_gb: float) -> float:
-    """Calculate timeout based on model size in GB."""
+def _warmup_timeout(size_gb: float) -> float:
+    """Calculate warmup (initial VRAM load) timeout based on model size."""
     if size_gb > 70:
         return 180.0
     if size_gb > 30:
@@ -351,6 +351,17 @@ def _adaptive_timeout(size_gb: float) -> float:
     if size_gb > 10:
         return 60.0
     return 30.0
+
+
+def _inference_timeout(size_gb: float) -> float:
+    """Calculate per-test inference timeout. Much shorter than warmup since model is already loaded."""
+    if size_gb > 70:
+        return 60.0
+    if size_gb > 30:
+        return 45.0
+    if size_gb > 10:
+        return 30.0
+    return 20.0
 
 
 def _get_gpu_info() -> list[dict]:
@@ -476,6 +487,8 @@ class BenchmarkEngine:
 
         Returns: {"success": bool, "load_time_sec": float, "error": str | None}
         """
+        original_timeout = self.client.timeout
+        self.client.timeout = timeout
         start = time.monotonic()
         try:
             await self.client.chat(
@@ -488,6 +501,8 @@ class BenchmarkEngine:
         except Exception as e:
             elapsed = time.monotonic() - start
             return {"success": False, "load_time_sec": round(elapsed, 1), "error": str(e)}
+        finally:
+            self.client.timeout = original_timeout
 
     async def run_benchmark(
         self,
@@ -511,18 +526,19 @@ class BenchmarkEngine:
         """
         from datetime import datetime, timezone
 
-        # Adaptive timeout
+        # Separate timeouts: warmup (initial load) vs inference (per-test)
+        warmup_sec = _warmup_timeout(model_size_gb)
         if timeout_per_test <= 0:
-            timeout_per_test = _adaptive_timeout(model_size_gb)
+            timeout_per_test = _inference_timeout(model_size_gb)
 
-        # Temporarily adjust client timeout for this benchmark
+        # Temporarily adjust client timeout for inference
         original_timeout = self.client.timeout
         self.client.timeout = timeout_per_test
 
-        # Warmup: load model into VRAM before measuring
+        # Warmup: load model into VRAM (uses longer warmup timeout)
         warmup_info = None
         if warmup:
-            warmup_info = await self.warmup(model_name, timeout=timeout_per_test)
+            warmup_info = await self.warmup(model_name, timeout=warmup_sec)
             if not warmup_info["success"]:
                 self.client.timeout = original_timeout
                 # Model failed to load — mark as unavailable

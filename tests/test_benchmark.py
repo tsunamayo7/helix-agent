@@ -12,7 +12,8 @@ from src.benchmark import (
     BenchmarkEngine,
     BenchmarkTest,
     ModelBenchmark,
-    _adaptive_timeout,
+    _inference_timeout,
+    _warmup_timeout,
     preflight_check,
     validate_code_fizzbuzz,
     validate_code_reverse,
@@ -294,17 +295,33 @@ class TestBenchmarkEngine:
 
 
 class TestAdaptiveTimeout:
-    def test_small_model(self):
-        assert _adaptive_timeout(5.0) == 30.0
+    def test_warmup_small(self):
+        assert _warmup_timeout(5.0) == 30.0
 
-    def test_medium_model(self):
-        assert _adaptive_timeout(15.0) == 60.0
+    def test_warmup_medium(self):
+        assert _warmup_timeout(15.0) == 60.0
 
-    def test_large_model(self):
-        assert _adaptive_timeout(50.0) == 120.0
+    def test_warmup_large(self):
+        assert _warmup_timeout(50.0) == 120.0
 
-    def test_huge_model(self):
-        assert _adaptive_timeout(80.0) == 180.0
+    def test_warmup_huge(self):
+        assert _warmup_timeout(80.0) == 180.0
+
+    def test_inference_small(self):
+        assert _inference_timeout(5.0) == 20.0
+
+    def test_inference_medium(self):
+        assert _inference_timeout(15.0) == 30.0
+
+    def test_inference_large(self):
+        assert _inference_timeout(50.0) == 45.0
+
+    def test_inference_huge(self):
+        assert _inference_timeout(80.0) == 60.0
+
+    def test_warmup_always_longer_than_inference(self):
+        for size in [1, 5, 15, 40, 60, 80, 100]:
+            assert _warmup_timeout(size) >= _inference_timeout(size)
 
 
 class TestPreflightCheck:
