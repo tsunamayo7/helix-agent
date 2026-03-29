@@ -8,8 +8,11 @@
     <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-blue?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+"></a>
     <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-compatible-green?style=flat-square" alt="MCP Compatible"></a>
     <a href="https://ollama.com"><img src="https://img.shields.io/badge/Ollama-local%20LLM-purple?style=flat-square" alt="Ollama"></a>
+    <a href="https://github.com/tsunamayo7/helix-agent"><img src="https://img.shields.io/github/stars/tsunamayo7/helix-agent?style=flat-square" alt="Stars"></a>
   </p>
 </p>
+
+**English** | [日本語](README_ja.md)
 
 ---
 
