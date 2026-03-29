@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from .ollama_client import OllamaClient
 from .react_loop import ReactLoop
 from .router import Capability, ModelRouter
+from .builtin_tools import create_full_registry
 from .tools import create_default_registry
 
 
@@ -53,8 +54,8 @@ class HelixAgent:
         else:
             selected = model
 
-        # Build tool registry
-        registry = create_default_registry()
+        # Build tool registry (full set with file access)
+        registry = create_full_registry()
 
         # Filter tools if specified
         if tools:
