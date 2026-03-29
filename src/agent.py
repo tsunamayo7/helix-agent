@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .ollama_client import OllamaClient
+from .react_loop import ReactLoop
 from .router import Capability, ModelRouter
+from .tools import create_default_registry
 
 
 @dataclass
@@ -27,6 +29,61 @@ class HelixAgent:
             timeout=self.config.ollama_timeout,
         )
         self.router = ModelRouter(self.client)
+
+    async def agent(
+        self,
+        task: str,
+        context: str = "",
+        model: str = "auto",
+        mode: str = "",
+        max_steps: int = 10,
+        tools: list[str] | None = None,
+    ) -> dict:
+        """Run a ReAct agent loop: the local LLM reasons and acts iteratively."""
+        mode = mode or self.config.default_mode
+
+        # Model selection
+        if model == "auto":
+            try:
+                selected = await self.router.select_for_task(task, mode=mode)
+            except Exception:
+                return {"error": "Cannot connect to Ollama. Is it running?"}
+            if not selected:
+                return {"error": "No Ollama models available. Run: ollama pull gemma3"}
+        else:
+            selected = model
+
+        # Build tool registry
+        registry = create_default_registry()
+
+        # Filter tools if specified
+        if tools:
+            from .tools import ToolRegistry
+            filtered = ToolRegistry()
+            for name in tools:
+                tool = registry.get(name)
+                if tool:
+                    filtered.register(tool)
+            registry = filtered
+
+        # Run ReAct loop
+        loop = ReactLoop(
+            client=self.client,
+            tools=registry,
+            max_steps=max_steps,
+        )
+
+        try:
+            result = await loop.run(
+                task=task,
+                model=selected,
+                context=context,
+                temperature=0.1,
+            )
+        except Exception as e:
+            return {"error": f"Agent loop failed: {e}", "model": selected}
+
+        return result.to_dict()
 
     async def think(
         self,

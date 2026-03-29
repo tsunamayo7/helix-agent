@@ -10,7 +10,8 @@ mcp = FastMCP(
     "helix-agent",
     instructions=(
         "helix-agent delegates tasks to local Ollama LLM models. "
-        "Use 'think' for reasoning, analysis, code generation, and summarization. "
+        "Use 'think' for single-step reasoning, analysis, or code generation. "
+        "Use 'agent' for multi-step tasks requiring iterative reasoning with tool use (ReAct loop). "
         "Use 'see' for image analysis and OCR. "
         "Use 'models' to check available local models. "
         "Model selection is automatic — just describe what you need."
@@ -36,6 +37,31 @@ async def think(
         mode: "quality" (thorough), "fast" (brief), or "creative" (exploratory)
     """
     return await agent.think(task=task, context=context, model=model, mode=mode)
+
+
+@mcp.tool()
+async def agent_task(
+    task: str,
+    context: str = "",
+    model: str = "auto",
+    mode: str = "quality",
+    max_steps: int = 10,
+) -> dict:
+    """Run a multi-step ReAct agent loop using a local Ollama model.
+
+    The LLM reasons step-by-step, uses tools (calculate, search_memory),
+    observes results, and iterates until it reaches a final answer.
+
+    Args:
+        task: The objective for the agent (e.g., "Analyze this data and calculate the average")
+        context: Additional context like code, data, or text
+        model: Model name or "auto" for intelligent auto-selection
+        mode: "quality" (thorough) or "fast" (brief)
+        max_steps: Maximum reasoning steps (default 10)
+    """
+    return await agent.agent(
+        task=task, context=context, model=model, mode=mode, max_steps=max_steps,
+    )
 
 
 @mcp.tool()
