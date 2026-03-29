@@ -202,7 +202,13 @@ class HelixAgent:
         return result
 
     async def _run_benchmark(self, model_name: str = "") -> dict:
-        """Run benchmarks on specified model or all unbenchmarked models."""
+        """Run benchmarks on specified model or all unbenchmarked models.
+
+        Includes preflight VRAM check, adaptive timeout, warmup, and lite mode
+        for large models (>30GB).
+        """
+        from .benchmark import preflight_check
+
         await self.router.refresh()
         engine = self.router.benchmark_engine
         all_models = [info.name for info in self.router.get_all_models()
@@ -210,10 +216,8 @@ class HelixAgent:
                        or len(info.capabilities) > 1]
 
         if model_name:
-            # Benchmark specific model
             targets = [model_name]
         else:
-            # Benchmark all unbenchmarked models
             targets = engine.get_unbenchmarked(all_models)
             if not targets:
                 return {
@@ -224,23 +228,54 @@ class HelixAgent:
 
         results = []
         for target in targets:
-            # Skip pure embedding models
             info = self.router._models.get(target)
             if info and Capability.EMBEDDING in info.capabilities and len(info.capabilities) == 1:
                 continue
 
+            size_gb = info.size_gb if info else 0.0
+
+            # Preflight VRAM check for large models
+            if size_gb > 30:
+                check = preflight_check(size_gb)
+                if not check["can_run"]:
+                    results.append({
+                        "model": target,
+                        "skipped": True,
+                        "reason": check["reason"],
+                        "size_gb": round(size_gb, 1),
+                    })
+                    continue
+
+            # Use lite mode for large models (>30GB)
+            use_lite = size_gb > 30
+
             try:
-                bm = await engine.run_benchmark(target, timeout_per_test=90.0)
-                results.append({
+                bm = await engine.run_benchmark(
+                    target,
+                    model_size_gb=size_gb,
+                    lite=use_lite,
+                    warmup=True,
+                )
+
+                entry = {
                     "model": target,
                     "total_score": bm.total_score,
                     "categories": bm.category_scores,
                     "avg_tps": bm.avg_tokens_per_sec,
-                })
+                    "size_gb": round(size_gb, 1),
+                }
+                if use_lite:
+                    entry["mode"] = "lite"
+                # Check if warmup failed
+                if bm.results and isinstance(bm.results[0], dict) and bm.results[0].get("warmup_failed"):
+                    entry["warmup_failed"] = True
+                    entry["error"] = bm.results[0].get("error", "warmup failed")
+                results.append(entry)
             except Exception as e:
                 results.append({
                     "model": target,
                     "error": str(e),
+                    "size_gb": round(size_gb, 1),
                 })
 
         return {

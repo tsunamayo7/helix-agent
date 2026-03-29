@@ -342,6 +342,91 @@ _VALIDATORS: dict[str, callable] = {
 }
 
 
+def _adaptive_timeout(size_gb: float) -> float:
+    """Calculate timeout based on model size in GB."""
+    if size_gb > 70:
+        return 180.0
+    if size_gb > 30:
+        return 120.0
+    if size_gb > 10:
+        return 60.0
+    return 30.0
+
+
+def _get_gpu_info() -> list[dict]:
+    """Get GPU VRAM info via nvidia-smi. Returns list of {name, vram_total_mb, vram_free_mb}."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total,memory.free",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return []
+        gpus = []
+        for line in result.stdout.strip().split("\n"):
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) >= 3:
+                gpus.append({
+                    "name": parts[0],
+                    "vram_total_mb": int(parts[1]),
+                    "vram_free_mb": int(parts[2]),
+                })
+        return gpus
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+
+
+def preflight_check(model_size_gb: float, gpus: list[dict] | None = None) -> dict:
+    """Check if a model can likely run given available VRAM.
+
+    Returns: {"can_run": bool, "reason": str, "gpus": list, "total_free_gb": float}
+    """
+    if gpus is None:
+        gpus = _get_gpu_info()
+
+    if not gpus:
+        return {
+            "can_run": True,  # Assume yes if we can't detect GPU (CPU mode possible)
+            "reason": "GPU info unavailable — assuming CPU/unknown GPU",
+            "gpus": [],
+            "total_free_gb": 0,
+        }
+
+    total_free_mb = sum(g["vram_free_mb"] for g in gpus)
+    total_free_gb = total_free_mb / 1024
+
+    # Rough heuristic: model needs ~1.2x its file size in VRAM for inference
+    required_gb = model_size_gb * 1.2
+
+    if total_free_gb >= required_gb:
+        return {
+            "can_run": True,
+            "reason": f"Sufficient VRAM: {total_free_gb:.1f}GB free >= {required_gb:.1f}GB required",
+            "gpus": gpus,
+            "total_free_gb": round(total_free_gb, 1),
+        }
+    elif total_free_gb >= model_size_gb * 0.6:
+        return {
+            "can_run": True,
+            "reason": f"Partial offload likely: {total_free_gb:.1f}GB free, {required_gb:.1f}GB ideal (may be slow)",
+            "gpus": gpus,
+            "total_free_gb": round(total_free_gb, 1),
+        }
+    else:
+        return {
+            "can_run": False,
+            "reason": f"Insufficient VRAM: {total_free_gb:.1f}GB free < {model_size_gb * 0.6:.1f}GB minimum",
+            "gpus": gpus,
+            "total_free_gb": round(total_free_gb, 1),
+        }
+
+
+# Lite benchmark: subset for large models
+BENCHMARK_LITE_TESTS = [t for t in BENCHMARK_TESTS if t.name in ("fizzbuzz", "math", "json_output")]
+
+
 class BenchmarkEngine:
     """Runs benchmark tests against Ollama models and caches results."""
 
@@ -386,19 +471,78 @@ class BenchmarkEngine:
         """Find models that are installed but not yet benchmarked."""
         return [m for m in installed_models if m not in self._cache]
 
+    async def warmup(self, model_name: str, timeout: float = 120.0) -> dict:
+        """Send a minimal prompt to load the model into VRAM.
+
+        Returns: {"success": bool, "load_time_sec": float, "error": str | None}
+        """
+        start = time.monotonic()
+        try:
+            await self.client.chat(
+                model=model_name,
+                messages=[{"role": "user", "content": "Hi"}],
+                temperature=0.0,
+            )
+            elapsed = time.monotonic() - start
+            return {"success": True, "load_time_sec": round(elapsed, 1), "error": None}
+        except Exception as e:
+            elapsed = time.monotonic() - start
+            return {"success": False, "load_time_sec": round(elapsed, 1), "error": str(e)}
+
     async def run_benchmark(
         self,
         model_name: str,
         *,
-        timeout_per_test: float = 60.0,
+        model_size_gb: float = 0.0,
+        timeout_per_test: float = 0.0,
         skip_categories: list[str] | None = None,
+        lite: bool = False,
+        warmup: bool = True,
     ) -> ModelBenchmark:
-        """Run full benchmark suite on a single model."""
+        """Run benchmark suite on a single model.
+
+        Args:
+            model_name: Ollama model name
+            model_size_gb: Model file size for adaptive timeout (0 = use default)
+            timeout_per_test: Override timeout per test (0 = auto based on model size)
+            skip_categories: Categories to skip
+            lite: Use lite test suite (3 tests instead of 8, for large models)
+            warmup: Warmup model before benchmarking (load into VRAM)
+        """
         from datetime import datetime, timezone
 
+        # Adaptive timeout
+        if timeout_per_test <= 0:
+            timeout_per_test = _adaptive_timeout(model_size_gb)
+
+        # Temporarily adjust client timeout for this benchmark
+        original_timeout = self.client.timeout
+        self.client.timeout = timeout_per_test
+
+        # Warmup: load model into VRAM before measuring
+        warmup_info = None
+        if warmup:
+            warmup_info = await self.warmup(model_name, timeout=timeout_per_test)
+            if not warmup_info["success"]:
+                self.client.timeout = original_timeout
+                # Model failed to load — mark as unavailable
+                bm = ModelBenchmark(
+                    model_name=model_name,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    total_score=0.0,
+                    category_scores={},
+                    avg_tokens_per_sec=0.0,
+                    results=[{"error": warmup_info["error"], "warmup_failed": True}],
+                )
+                self._cache[model_name] = bm
+                self._save_cache()
+                return bm
+
+        # Select test suite
+        tests = BENCHMARK_LITE_TESTS if lite else BENCHMARK_TESTS
         results: list[BenchmarkResult] = []
 
-        for test in BENCHMARK_TESTS:
+        for test in tests:
             if skip_categories and test.category in skip_categories:
                 continue
 
@@ -443,6 +587,9 @@ class BenchmarkEngine:
                     response_time_sec=round(elapsed, 2),
                     tokens_per_sec=0.0,
                 ))
+
+        # Restore original timeout
+        self.client.timeout = original_timeout
 
         # Aggregate scores
         benchmark = self._aggregate(model_name, results)

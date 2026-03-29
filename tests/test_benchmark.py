@@ -8,9 +8,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.benchmark import (
+    BENCHMARK_LITE_TESTS,
     BenchmarkEngine,
     BenchmarkTest,
     ModelBenchmark,
+    _adaptive_timeout,
+    preflight_check,
     validate_code_fizzbuzz,
     validate_code_reverse,
     validate_exact_number,
@@ -217,8 +220,10 @@ class TestBenchmarkEngine:
     async def test_run_benchmark(self, tmp_path):
         cache_path = tmp_path / "bench.json"
         client = AsyncMock()
-        # Mock chat to return reasonable responses
+        client.timeout = 120.0
+        # Mock chat: warmup + 8 tests = 9 calls
         responses = iter([
+            "ok",  # warmup
             'def fizzbuzz(n):\n    return ["FizzBuzz" if i%3==0 and i%5==0 else "Fizz" if i%3==0 else "Buzz" if i%5==0 else str(i) for i in range(1,n+1)]',
             'def reverse_words(s):\n    return " ".join(s.split()[::-1])',
             "No, we cannot conclude that.",
@@ -237,6 +242,110 @@ class TestBenchmarkEngine:
         assert result.total_score > 0
         assert len(result.results) == 8
         assert "test:7b" in engine._cache
+
+    @pytest.mark.asyncio
+    async def test_run_benchmark_lite(self, tmp_path):
+        cache_path = tmp_path / "bench.json"
+        client = AsyncMock()
+        client.timeout = 120.0
+        responses = iter([
+            "ok",  # warmup
+            'def fizzbuzz(n):\n    return ["FizzBuzz" if i%3==0 and i%5==0 else "Fizz" if i%3==0 else "Buzz" if i%5==0 else str(i) for i in range(1,n+1)]',
+            "424",
+            '{"name": "Alice", "age": 30, "city": "Tokyo"}',
+        ])
+        client.chat = AsyncMock(side_effect=lambda **kwargs: next(responses))
+
+        engine = BenchmarkEngine(client, cache_path=cache_path)
+        result = await engine.run_benchmark("big:122b", lite=True)
+
+        assert result.model_name == "big:122b"
+        assert len(result.results) == 3  # lite = 3 tests
+
+    @pytest.mark.asyncio
+    async def test_run_benchmark_warmup_failure(self, tmp_path):
+        cache_path = tmp_path / "bench.json"
+        client = AsyncMock()
+        client.timeout = 120.0
+        client.chat = AsyncMock(side_effect=Exception("500 Internal Server Error"))
+
+        engine = BenchmarkEngine(client, cache_path=cache_path)
+        result = await engine.run_benchmark("broken:70b")
+
+        assert result.model_name == "broken:70b"
+        assert result.total_score == 0.0
+        assert result.results[0].get("warmup_failed") is True
+
+    @pytest.mark.asyncio
+    async def test_warmup_success(self, tmp_path):
+        cache_path = tmp_path / "bench.json"
+        client = AsyncMock()
+        client.timeout = 120.0
+        client.chat = AsyncMock(return_value="ok")
+
+        engine = BenchmarkEngine(client, cache_path=cache_path)
+        result = await engine.warmup("test:7b")
+
+        assert result["success"] is True
+        assert result["load_time_sec"] >= 0
+
+
+# --- Adaptive timeout and preflight ---
+
+
+class TestAdaptiveTimeout:
+    def test_small_model(self):
+        assert _adaptive_timeout(5.0) == 30.0
+
+    def test_medium_model(self):
+        assert _adaptive_timeout(15.0) == 60.0
+
+    def test_large_model(self):
+        assert _adaptive_timeout(50.0) == 120.0
+
+    def test_huge_model(self):
+        assert _adaptive_timeout(80.0) == 180.0
+
+
+class TestPreflightCheck:
+    def test_sufficient_vram(self):
+        gpus = [{"name": "RTX PRO 6000", "vram_total_mb": 98304, "vram_free_mb": 90000}]
+        result = preflight_check(70.0, gpus=gpus)
+        assert result["can_run"] is True
+
+    def test_insufficient_vram(self):
+        gpus = [{"name": "RTX 4060", "vram_total_mb": 8192, "vram_free_mb": 6000}]
+        result = preflight_check(70.0, gpus=gpus)
+        assert result["can_run"] is False
+
+    def test_partial_offload(self):
+        gpus = [{"name": "RTX 5070 Ti", "vram_total_mb": 16384, "vram_free_mb": 14000}]
+        result = preflight_check(20.0, gpus=gpus)
+        assert result["can_run"] is True
+
+    def test_no_gpu_info(self):
+        result = preflight_check(50.0, gpus=[])
+        assert result["can_run"] is True  # Assume yes if GPU unknown
+
+    def test_multi_gpu(self):
+        gpus = [
+            {"name": "RTX 5070 Ti", "vram_total_mb": 16384, "vram_free_mb": 14000},
+            {"name": "RTX PRO 6000", "vram_total_mb": 98304, "vram_free_mb": 90000},
+        ]
+        result = preflight_check(80.0, gpus=gpus)
+        assert result["can_run"] is True
+        assert result["total_free_gb"] > 100
+
+
+class TestBenchmarkLiteTests:
+    def test_lite_has_3_tests(self):
+        assert len(BENCHMARK_LITE_TESTS) == 3
+
+    def test_lite_test_names(self):
+        names = [t.name for t in BENCHMARK_LITE_TESTS]
+        assert "fizzbuzz" in names
+        assert "math" in names
+        assert "json_output" in names
 
 
 # --- Router with benchmark integration ---

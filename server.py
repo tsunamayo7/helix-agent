@@ -63,7 +63,7 @@ async def models(action: str = "list", model_name: str = "") -> dict:
                 "capabilities" (capability → model map),
                 "probe" (test each model's availability and response time),
                 "detailed" (metadata-enriched listing),
-                "benchmark" (run benchmark on model_name or all unbenchmarked models),
+                "benchmark" (run benchmark with preflight VRAM check, adaptive timeout, warmup, auto-lite for large models),
                 "benchmark_status" (show benchmark ranking),
                 "use" (lock routing to model_name),
                 "use_auto" (switch back to auto-selection)
