@@ -76,6 +76,25 @@ Claude Code: "Use helix-agent to summarize this 500-line log file"
 - `fast` — Small model, brief output
 - `creative` — High temperature, exploratory
 
+### `agent_task` — Autonomous ReAct Agent
+
+Run multi-step tasks where the local LLM reasons, uses tools, and iterates autonomously.
+
+```
+Claude Code: "Use helix-agent agent to read pyproject.toml and summarize the project"
+-> Step 1: LLM thinks "I need to read the file" → read_file
+-> Step 2: LLM analyzes contents → finish with summary
+-> Returns structured result with full reasoning trace
+```
+
+**Built-in tools:**
+- `read_file` / `write_file` / `list_files` / `search_in_file` — File operations (PathGuard secured)
+- `run_command` — Shell execution (allowlist: git, python, uv, ollama)
+- `calculate` — Safe math evaluation
+- `search_memory` — Qdrant semantic search
+
+**Security:** PathGuard enforces directory allowlists, blocks sensitive files (.env, credentials, SSH keys), and prevents path traversal attacks.
+
 ### `see` — Vision & OCR
 
 Analyze images with local Vision models.
@@ -202,7 +221,7 @@ Run benchmarks on your actual hardware to optimize routing:
 ## Development
 
 ```bash
-# Run tests (82 tests)
+# Run tests (144 tests)
 uv run pytest tests/ -v
 
 # Type check
@@ -214,7 +233,8 @@ uv run python -m py_compile server.py
 - [x] v0.1.0 — Core tools (think, see, models, config) + name-based auto-routing
 - [x] v0.2.0 — Metadata-enhanced routing (context length, parameter count, smart fast mode)
 - [x] v0.3.0 — Local benchmark engine, model override, benchmark-aware routing
-- [ ] v0.4.0 — OTel measurement-based routing, parallel inference
+- [x] v0.4.0 — ReAct agent loop, file tools with PathGuard, progress notifications
+- [ ] v0.5.0 — Qdrant memory integration, helix-sandbox command execution
 - [ ] v1.0.0 — Public release, mcpservers.org listing
 
 ## Related Projects
