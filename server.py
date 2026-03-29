@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 
 from src.agent import AgentConfig, HelixAgent
 
@@ -46,21 +46,32 @@ async def agent_task(
     model: str = "auto",
     mode: str = "quality",
     max_steps: int = 10,
+    ctx: Context = None,
 ) -> dict:
     """Run a multi-step ReAct agent loop using a local Ollama model.
 
-    The LLM reasons step-by-step, uses tools (calculate, search_memory),
-    observes results, and iterates until it reaches a final answer.
+    The LLM reasons step-by-step, uses tools (read_file, write_file, list_files,
+    search_in_file, run_command, calculate, search_memory), observes results,
+    and iterates until it reaches a final answer.
 
     Args:
-        task: The objective for the agent (e.g., "Analyze this data and calculate the average")
+        task: The objective for the agent (e.g., "Read pyproject.toml and summarize the project")
         context: Additional context like code, data, or text
         model: Model name or "auto" for intelligent auto-selection
         mode: "quality" (thorough) or "fast" (brief)
         max_steps: Maximum reasoning steps (default 10)
     """
+    # Progress callback using MCP Context
+    async def on_progress(step: int, total: int, action: str) -> None:
+        if ctx:
+            try:
+                await ctx.report_progress(step, total)
+            except Exception:
+                pass  # Progress reporting is best-effort
+
     return await agent.agent(
         task=task, context=context, model=model, mode=mode, max_steps=max_steps,
+        _on_progress=on_progress,
     )
 
 

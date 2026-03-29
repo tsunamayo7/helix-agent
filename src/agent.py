@@ -39,6 +39,7 @@ class HelixAgent:
         mode: str = "",
         max_steps: int = 10,
         tools: list[str] | None = None,
+        _on_progress=None,
     ) -> dict:
         """Run a ReAct agent loop: the local LLM reasons and acts iteratively."""
         mode = mode or self.config.default_mode
@@ -80,6 +81,7 @@ class HelixAgent:
                 model=selected,
                 context=context,
                 temperature=0.1,
+                on_progress=_on_progress,
             )
         except Exception as e:
             return {"error": f"Agent loop failed: {e}", "model": selected}

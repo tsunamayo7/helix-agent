@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from typing import Awaitable, Callable
 
 from .ollama_client import OllamaClient
 from .tools import ToolRegistry
@@ -89,8 +90,13 @@ class ReactLoop:
         *,
         context: str = "",
         temperature: float = 0.1,
+        on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
     ) -> AgentResult:
-        """Run the ReAct loop until finish or max_steps."""
+        """Run the ReAct loop until finish or max_steps.
+
+        Args:
+            on_progress: Optional async callback(step, max_steps, action) for progress reporting.
+        """
         system = REACT_SYSTEM_PROMPT.format(tools=self.tools.format_for_prompt())
 
         messages = [
@@ -147,6 +153,10 @@ class ReactLoop:
                     steps=steps,
                     finished=True,
                 )
+
+            # Report progress
+            if on_progress:
+                await on_progress(step_num, self.max_steps, action)
 
             # Execute tool
             observation = await self.tools.execute(action, str(action_input))
