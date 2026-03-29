@@ -203,9 +203,13 @@ class ModelRouter:
                 priority = _compute_priority(name, capability, info.size_bytes)
 
                 if prefer_fast:
-                    # Penalize large models
-                    if info.size_gb > 20:
-                        priority -= 3
+                    # Penalize large models heavily in fast mode
+                    if info.size_gb > 50:
+                        priority -= 8
+                    elif info.size_gb > 20:
+                        priority -= 5
+                    elif info.size_gb < 10:
+                        priority += 3
                 elif prefer_large:
                     # Boost large models
                     if info.size_gb > 20:

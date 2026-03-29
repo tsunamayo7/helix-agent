@@ -158,15 +158,23 @@ helix-agent works with any Ollama model. Auto-routing is optimized for:
 
 | Capability | Recommended Models |
 |-----------|-------------------|
-| Reasoning | qwen3.5, nemotron-cascade-2, llama3.3 |
-| Code | qwen-coder, codestral, deepseek-coder |
+| Reasoning | qwen3.5, nemotron-cascade-2, llama3.3, command-a |
+| Code | qwen-coder, codestral, devstral, deepseek-coder |
 | Vision | mistral-small3.2, gemma3, moondream |
-| Embedding | qwen3-embedding, nomic-embed-text |
+| Embedding | qwen3-embedding, nomic-embed-text, bge |
+
+### v0.2.0: Metadata-Enhanced Routing
+
+Auto-routing now uses `ollama show` metadata for better model selection:
+- **Context length** awareness (e.g., 262K for nemotron-cascade-2)
+- **Parameter count** extraction for quality estimation
+- **Smart fast mode** — penalizes 50GB+ models, prefers <10GB for speed
+- Use `models(action="detailed")` to see full metadata
 
 ## Development
 
 ```bash
-# Run tests
+# Run tests (54 tests)
 uv run pytest tests/ -v
 
 # Type check
@@ -175,9 +183,9 @@ uv run python -m py_compile server.py
 
 ## Roadmap
 
-- [x] v0.1.0 — Core tools (think, see, models, config) + auto-routing (49 tests passing)
-- [ ] v0.2.0 — Qdrant shared memory integration (`remember` tool)
-- [ ] v0.3.0 — Benchmark-based routing, parallel inference, streaming
+- [x] v0.1.0 — Core tools (think, see, models, config) + name-based auto-routing
+- [x] v0.2.0 — Metadata-enhanced routing (context length, parameter count, smart fast mode)
+- [ ] v0.3.0 — OTel measurement-based routing, benchmark auto-execution
 - [ ] v1.0.0 — Public release, mcpservers.org listing
 
 ## Related Projects
