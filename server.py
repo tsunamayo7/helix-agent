@@ -55,13 +55,21 @@ async def see(
 
 
 @mcp.tool()
-async def models(action: str = "list") -> dict:
+async def models(action: str = "list", model_name: str = "") -> dict:
     """Get information about available local Ollama models.
 
     Args:
-        action: "list" (all models + capabilities), "status" (connection check), "capabilities" (capability → model map)
+        action: "list" (all models + benchmark scores), "status" (connection check),
+                "capabilities" (capability → model map),
+                "probe" (test each model's availability and response time),
+                "detailed" (metadata-enriched listing),
+                "benchmark" (run benchmark on model_name or all unbenchmarked models),
+                "benchmark_status" (show benchmark ranking),
+                "use" (lock routing to model_name),
+                "use_auto" (switch back to auto-selection)
+        model_name: Target model for "benchmark" or "use" actions
     """
-    return await agent.models(action=action)
+    return await agent.models(action=action, model_name=model_name)
 
 
 @mcp.tool()

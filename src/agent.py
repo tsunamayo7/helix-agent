@@ -120,7 +120,7 @@ class HelixAgent:
             "image": image_path,
         }
 
-    async def models(self, action: str = "list") -> dict:
+    async def models(self, action: str = "list", model_name: str = "") -> dict:
         """Get information about available Ollama models."""
         available = await self.client.is_available()
         if not available:
@@ -129,6 +129,42 @@ class HelixAgent:
         if action == "status":
             return {"status": "connected", "host": self.config.ollama_host}
 
+        if action == "use":
+            if not model_name:
+                return {"error": "model_name is required for 'use' action"}
+            self.router.set_model_override(model_name)
+            return {"model_override": model_name, "message": f"All requests will now use: {model_name}"}
+
+        if action == "use_auto":
+            self.router.set_model_override(None)
+            return {"model_override": None, "message": "Switched back to auto-selection"}
+
+        if action == "probe":
+            await self.router.refresh()
+            results = await self.router.probe_models()
+            summary = []
+            for name, ok in results.items():
+                info = self.router._models.get(name)
+                entry = {"name": name, "available": ok}
+                if info and info.avg_response_sec:
+                    entry["response_sec"] = info.avg_response_sec
+                if info:
+                    entry["size_gb"] = round(info.size_gb, 1)
+                summary.append(entry)
+            available_count = sum(1 for v in results.values() if v)
+            return {
+                "probed": len(results),
+                "available": available_count,
+                "unavailable": len(results) - available_count,
+                "models": summary,
+            }
+
+        if action == "benchmark":
+            return await self._run_benchmark(model_name)
+
+        if action == "benchmark_status":
+            return self._benchmark_status()
+
         fetch_meta = action == "detailed"
         await self.router.refresh(fetch_metadata=fetch_meta)
 
@@ -136,7 +172,7 @@ class HelixAgent:
             cap_map = await self.router.get_capabilities_map()
             return {"capabilities": cap_map}
 
-        # Default: list
+        # Default: list (include benchmark scores if available)
         models_list = []
         for info in self.router.get_all_models():
             entry = {
@@ -149,8 +185,96 @@ class HelixAgent:
             }
             if info.context_length:
                 entry["context_length"] = info.context_length
+            # Add benchmark score if available
+            bm = self.router.benchmark_engine.get_cached(info.name)
+            if bm:
+                entry["benchmark_score"] = bm.total_score
+                entry["benchmark_categories"] = bm.category_scores
             models_list.append(entry)
-        return {"models": models_list, "count": len(models_list)}
+
+        result = {"models": models_list, "count": len(models_list)}
+
+        # Show override status
+        override = self.router.get_model_override()
+        if override:
+            result["model_override"] = override
+
+        return result
+
+    async def _run_benchmark(self, model_name: str = "") -> dict:
+        """Run benchmarks on specified model or all unbenchmarked models."""
+        await self.router.refresh()
+        engine = self.router.benchmark_engine
+        all_models = [info.name for info in self.router.get_all_models()
+                       if Capability.EMBEDDING not in info.capabilities
+                       or len(info.capabilities) > 1]
+
+        if model_name:
+            # Benchmark specific model
+            targets = [model_name]
+        else:
+            # Benchmark all unbenchmarked models
+            targets = engine.get_unbenchmarked(all_models)
+            if not targets:
+                return {
+                    "message": "All models already benchmarked",
+                    "benchmarked": len(engine.get_all_cached()),
+                    "hint": "Use model_name to re-benchmark a specific model",
+                }
+
+        results = []
+        for target in targets:
+            # Skip pure embedding models
+            info = self.router._models.get(target)
+            if info and Capability.EMBEDDING in info.capabilities and len(info.capabilities) == 1:
+                continue
+
+            try:
+                bm = await engine.run_benchmark(target, timeout_per_test=90.0)
+                results.append({
+                    "model": target,
+                    "total_score": bm.total_score,
+                    "categories": bm.category_scores,
+                    "avg_tps": bm.avg_tokens_per_sec,
+                })
+            except Exception as e:
+                results.append({
+                    "model": target,
+                    "error": str(e),
+                })
+
+        return {
+            "benchmarked": len(results),
+            "results": results,
+            "total_cached": len(engine.get_all_cached()),
+        }
+
+    def _benchmark_status(self) -> dict:
+        """Get current benchmark status."""
+        engine = self.router.benchmark_engine
+        cached = engine.get_all_cached()
+
+        models_summary = []
+        for name, bm in cached.items():
+            models_summary.append({
+                "model": name,
+                "total_score": bm.total_score,
+                "categories": bm.category_scores,
+                "avg_tps": bm.avg_tokens_per_sec,
+                "timestamp": bm.timestamp,
+            })
+
+        # Sort by total score descending
+        models_summary.sort(key=lambda x: x["total_score"], reverse=True)
+
+        override = self.router.get_model_override()
+        result = {
+            "benchmarked_models": len(cached),
+            "ranking": models_summary,
+        }
+        if override:
+            result["model_override"] = override
+        return result
 
     async def config_action(self, action: str = "show", key: str = "", value: str = "") -> dict:
         """View or update agent configuration."""

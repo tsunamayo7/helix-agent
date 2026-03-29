@@ -86,9 +86,9 @@ Claude Code: "Use helix-agent to OCR this screenshot"
 -> Extracts all text from the image
 ```
 
-### `models` — Model Discovery
+### `models` — Model Discovery, Benchmark & Override
 
-Check what's available locally.
+Check what's available, benchmark models on your hardware, and lock routing to a specific model.
 
 ```
 > models(action="capabilities")
@@ -98,6 +98,23 @@ Check what's available locally.
   "reasoning": ["qwen3.5:122b", "nemotron-cascade-2:latest"],
   "embedding": ["qwen3-embedding:8b"]
 }
+```
+
+**Benchmark** — Evaluate models on your actual hardware:
+
+```
+> models(action="benchmark")                        # Benchmark all unbenchmarked models
+> models(action="benchmark", model_name="gemma3:4b") # Benchmark a specific model
+> models(action="benchmark_status")                  # View ranking
+```
+
+Tests include: code generation (FizzBuzz, string manipulation), reasoning (logic, math), instruction following (JSON output, list format), Japanese (translation, summarization), and speed (tokens/sec). Results are cached in `~/.helix-agent/benchmarks.json` and automatically influence routing priority.
+
+**Model Override** — Lock routing to a specific model:
+
+```
+> models(action="use", model_name="qwen3.5:122b")   # Force all tasks to use this model
+> models(action="use_auto")                           # Switch back to auto-selection
 ```
 
 ### `config` — Runtime Configuration
@@ -119,9 +136,10 @@ Selected: qwen-coder:7b
 ```
 
 The router uses:
-1. **Name pattern matching** — Detects capabilities from model names
-2. **Size-based priority** — Larger models preferred for quality mode
-3. **Known model boosting** — Trusted models get priority
+1. **Local benchmark scores** — Real performance data from your hardware (v0.3.0)
+2. **Name pattern matching** — Detects capabilities from model names
+3. **Size-based priority** — Larger models preferred for quality mode
+4. **Known model boosting** — Trusted models get priority
 
 ## Quality-First Design
 
@@ -171,10 +189,20 @@ Auto-routing now uses `ollama show` metadata for better model selection:
 - **Smart fast mode** — penalizes 50GB+ models, prefers <10GB for speed
 - Use `models(action="detailed")` to see full metadata
 
+### v0.3.0: Local Benchmark + Model Override
+
+Run benchmarks on your actual hardware to optimize routing:
+- **8 automated tests** — code, reasoning, instruction following, Japanese, speed
+- **Auto-scoring** — regex + pattern matching validators
+- **Persistent cache** — results saved to `~/.helix-agent/benchmarks.json`
+- **New model detection** — automatically identifies unbenchmarked models
+- **Model override** — lock routing to a user-specified model
+- **Benchmark-aware routing** — scores directly influence model selection priority
+
 ## Development
 
 ```bash
-# Run tests (54 tests)
+# Run tests (82 tests)
 uv run pytest tests/ -v
 
 # Type check
@@ -185,7 +213,8 @@ uv run python -m py_compile server.py
 
 - [x] v0.1.0 — Core tools (think, see, models, config) + name-based auto-routing
 - [x] v0.2.0 — Metadata-enhanced routing (context length, parameter count, smart fast mode)
-- [ ] v0.3.0 — OTel measurement-based routing, benchmark auto-execution
+- [x] v0.3.0 — Local benchmark engine, model override, benchmark-aware routing
+- [ ] v0.4.0 — OTel measurement-based routing, parallel inference
 - [ ] v1.0.0 — Public release, mcpservers.org listing
 
 ## Related Projects
