@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">helix-agents architecture</title>
+  <desc id="desc">Claude Code routes through helix-agents to Ollama, Codex CLI, and OpenAI-compatible APIs.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1f2937"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="675" fill="url(#bg)"/>
+  <circle cx="1040" cy="90" r="140" fill="#1d4ed8" opacity="0.08"/>
+  <circle cx="180" cy="560" r="180" fill="#7c3aed" opacity="0.08"/>
+
+  <text x="70" y="92" fill="#e5e7eb" font-family="Segoe UI, Arial, sans-serif" font-size="54" font-weight="700">helix-agents</text>
+  <text x="70" y="128" fill="#94a3b8" font-family="Segoe UI, Arial, sans-serif" font-size="23">Multi-provider MCP runtime for Claude Code</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="190" rx="22" ry="22" width="360" height="122" fill="url(#panel)" stroke="#fb923c" stroke-width="2"/>
+    <rect x="94" y="214" rx="16" ry="16" width="46" height="46" fill="#fb923c"/>
+    <text x="117" y="244" text-anchor="middle" fill="#fff7ed" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="700">C</text>
+    <text x="165" y="237" fill="#f8fafc" font-family="Segoe UI, Arial, sans-serif" font-size="33" font-weight="600">Claude Code</text>
+    <text x="165" y="272" fill="#9ca3af" font-family="Segoe UI, Arial, sans-serif" font-size="22">Orchestrator that delegates work</text>
+
+    <rect x="70" y="356" rx="22" ry="22" width="360" height="140" fill="url(#panel)" stroke="#a78bfa" stroke-width="2"/>
+    <rect x="94" y="382" rx="16" ry="16" width="46" height="46" fill="#a78bfa"/>
+    <text x="117" y="412" text-anchor="middle" fill="#f5f3ff" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="700">M</text>
+    <text x="165" y="405" fill="#f8fafc" font-family="Segoe UI, Arial, sans-serif" font-size="33" font-weight="600">helix-agents</text>
+    <text x="165" y="440" fill="#9ca3af" font-family="Segoe UI, Arial, sans-serif" font-size="22">Unified MCP surface + background agents</text>
+    <text x="165" y="470" fill="#60a5fa" font-family="Segoe UI, Arial, sans-serif" font-size="20">think / agent_task / providers / spawn / wait</text>
+
+    <rect x="560" y="165" rx="20" ry="20" width="560" height="90" fill="#111827" stroke="#14b8a6" stroke-width="2"/>
+    <text x="590" y="218" fill="#ecfeff" font-family="Segoe UI, Arial, sans-serif" font-size="30" font-weight="600">Ollama</text>
+    <text x="770" y="218" fill="#94a3b8" font-family="Segoe UI, Arial, sans-serif" font-size="22">Local models, drafts, vision</text>
+
+    <rect x="560" y="292" rx="20" ry="20" width="560" height="90" fill="#111827" stroke="#f59e0b" stroke-width="2"/>
+    <text x="590" y="345" fill="#fffbeb" font-family="Segoe UI, Arial, sans-serif" font-size="30" font-weight="600">Codex CLI</text>
+    <text x="770" y="345" fill="#94a3b8" font-family="Segoe UI, Arial, sans-serif" font-size="22">Repo-heavy coding, review, implementation</text>
+
+    <rect x="560" y="419" rx="20" ry="20" width="560" height="90" fill="#111827" stroke="#38bdf8" stroke-width="2"/>
+    <text x="590" y="472" fill="#f0f9ff" font-family="Segoe UI, Arial, sans-serif" font-size="30" font-weight="600">OpenAI-compatible API</text>
+    <text x="885" y="472" fill="#94a3b8" font-family="Segoe UI, Arial, sans-serif" font-size="22">Hosted chat models via standard endpoints</text>
+  </g>
+
+  <path d="M430 250 C500 250, 500 210, 560 210" fill="none" stroke="#fb923c" stroke-width="4"/>
+  <path d="M430 426 C500 426, 500 337, 560 337" fill="none" stroke="#a78bfa" stroke-width="4"/>
+  <path d="M430 426 C500 426, 500 464, 560 464" fill="none" stroke="#a78bfa" stroke-width="4"/>
+
+  <text x="70" y="610" fill="#cbd5e1" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="600">Consistent interaction model:</text>
+  <text x="410" y="610" fill="#93c5fd" font-family="Segoe UI, Arial, sans-serif" font-size="24">spawn -> continue -> wait -> inspect -> close</text>
+  <text x="70" y="640" fill="#64748b" font-family="Segoe UI, Arial, sans-serif" font-size="19">github.com/tsunamayo7/helix-agent</text>
+</svg>

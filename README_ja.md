@@ -1,46 +1,46 @@
 # helix-agents
 
-Claude Code 向けの、複数 LLM プロバイダにタスクを委譲できる MCP サーバーです。
+Claude Code 向けの、複数 LLM プロバイダを 1 つの MCP で扱えるランタイムです。
 
-元の `helix-agent` は Ollama 中心でしたが、`helix-agents` では次のプロバイダを切り替え可能にしています。
+`helix-agents` は次の provider に同じ操作感で委譲できます。
 
 - `ollama`
 - `codex`
 - `openai-compatible`
 
-## 主な変更
+![helix-agents architecture](docs/assets/helix-agents-architecture.svg)
 
-- `provider="auto" | "ollama" | "codex" | "openai-compatible"` で切り替え可能
-- Claude Code 風の背景エージェント lifecycle を追加
-- provider の状態確認と既定 provider の切り替えを追加
-- Ollama 専用だった設計を維持互換しつつ Codex と API 系も追加
+## 特徴
+
+- `provider="auto" | "ollama" | "codex" | "openai-compatible"` で切り替え
+- Claude Code 風の background agent lifecycle
+- Ollama のローカル経路を残したまま Codex と API 系を追加
+- provider ごとに操作が分かれず、同じ MCP 面で扱える
+
+## 何が良いか
+
+多くの MCP は単発呼び出しで終わります。
+
+`helix-agents` はそれより一段自然で、Claude Code の sub-agent に近い形を狙っています。
+
+- provider を選ぶ
+- background worker を起動する
+- 追加指示を送る
+- 完了を待つ
+- 状態を確認して閉じる
 
 ## ツール
 
-### `think`
+コア:
 
-単発の推論、要約、レビュー、コード生成、調査に使います。
+- `think`
+- `agent_task`
+- `see`
+- `providers`
+- `models`
+- `config`
 
-### `agent_task`
-
-複数ステップの作業に使います。
-
-- `ollama` と `openai-compatible` は内蔵 ReAct loop を使用
-- `codex` は自律的な実装/レビュー agent として動作
-
-### `see`
-
-画像解析です。現状は `ollama` が最も自然です。
-
-### `providers`
-
-利用可能な provider を確認したり、既定 provider を切り替えます。
-
-### `models`
-
-provider ごとのモデル一覧確認やモデル固定に使います。
-
-### 背景エージェント系ツール
+background agent:
 
 - `spawn_agent`
 - `send_agent_input`
@@ -48,7 +48,13 @@ provider ごとのモデル一覧確認やモデル固定に使います。
 - `list_agents`
 - `close_agent`
 
-これにより、単発 bridge ではなく Claude Code の sub-agent に近い使い方ができます。
+## 使い分け
+
+| タスク | 向いている provider |
+|---|---|
+| ローカル要約、Vision、OCR | `ollama` |
+| repo をまたぐ実装、レビュー、修正 | `codex` |
+| API 経由の chat model | `openai-compatible` |
 
 ## セットアップ
 
@@ -72,11 +78,48 @@ Claude Code には次のように追加します。
 }
 ```
 
+## 例
+
+Codex で差分レビュー:
+
+```text
+think(
+  task="この差分の回帰リスクを見て",
+  provider="codex",
+  cwd="/repo"
+)
+```
+
+Ollama でローカル要約:
+
+```text
+think(
+  task="このビルドログを要約して",
+  provider="ollama"
+)
+```
+
+調査 worker を起動:
+
+```text
+spawn_agent(
+  description="flaky test 調査",
+  provider="codex",
+  agent_type="explorer"
+)
+```
+
+続けて:
+
+```text
+send_agent_input(...)
+wait_agent(...)
+close_agent(...)
+```
+
 ## 設定
 
-`config(action="show")` で確認できます。
-
-主なキー:
+`config(action="show")` で主な設定を確認できます。
 
 - `default_provider`
 - `ollama_host`
@@ -86,18 +129,16 @@ Claude Code には次のように追加します。
 - `openai_api_key_env`
 - `openai_model`
 
-例:
-
-```text
-providers(action="use", provider="codex")
-models(action="list", provider="ollama")
-config(action="set", key="openai_model", value="gpt-4.1")
-think(task="この差分をレビューして", provider="codex", cwd="/repo")
-spawn_agent(description="flaky test 調査", provider="codex", agent_type="explorer")
-```
-
 ## 補足
 
-- Codex 経路は `codex` CLI が `PATH` に必要です
-- OpenAI-compatible 経路は API キーが必要です
-- Vision は現状 Ollama 経路のみ実装しています
+- Codex は `codex` CLI が `PATH` に必要です
+- OpenAI-compatible は API キーが必要です
+- Vision は現状 Ollama 経路中心です
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+
+## Security
+
+[SECURITY.md](SECURITY.md) を参照してください。
