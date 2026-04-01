@@ -1,3 +1,3 @@
-"""helix-agent: Claude Code extension MCP server for local Ollama models."""
+"""helix-agents: Claude Code extension MCP server for multi-provider delegation."""
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

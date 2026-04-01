@@ -1,92 +1,349 @@
-"""HelixAgent: core logic for task delegation to local Ollama models."""
+"""HelixAgent: multi-provider task delegation and background agents."""
 
 from __future__ import annotations
 
+import asyncio
+import time
+import uuid
 from dataclasses import dataclass, field
 
-from .ollama_client import OllamaClient
-from .react_loop import ReactLoop
-from .router import Capability, ModelRouter
-from .builtin_tools import create_full_registry
-from .tools import create_default_registry
+from .provider_runtime import (
+    CodexProvider,
+    OllamaProvider,
+    OpenAICompatibleProvider,
+    SUPPORTED_PROVIDERS,
+)
+from .router import Capability, _infer_capability
 
 
 @dataclass
 class AgentConfig:
-    ollama_host: str = "http://localhost:11434"
-    ollama_timeout: float = 120.0
+    default_provider: str = "auto"  # auto | ollama | codex | openai-compatible
     default_mode: str = "quality"  # quality | fast | creative
     max_output_tokens: int = 4096
-    result_summary: bool = True  # Summarize long outputs to save context
+    result_summary: bool = True
+
+    ollama_host: str = "http://localhost:11434"
+    ollama_timeout: float = 120.0
+
+    codex_model: str = "gpt-5.4"
+    codex_sandbox: str = "workspace-write"
+    codex_timeout: int = 180
+
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: str = ""
+    openai_api_key_env: str = "OPENAI_API_KEY"
+    openai_model: str = "gpt-4.1-mini"
+    openai_timeout: float = 120.0
+
+
+AGENT_ROLE_PROMPTS = {
+    "default": (
+        "You are a Claude Code-style sub-agent. "
+        "Complete the assigned software task pragmatically and return concise high-signal results."
+    ),
+    "explorer": (
+        "You are a read-heavy explorer agent. Focus on investigation, concrete findings, "
+        "and precise references. Avoid edits unless explicitly asked."
+    ),
+    "worker": (
+        "You are an implementation-focused worker agent. Make targeted changes, "
+        "run relevant checks, and report what changed plus residual risk."
+    ),
+}
+
+
+def _normalize_provider(provider: str) -> str:
+    if provider in SUPPORTED_PROVIDERS:
+        return provider
+    return "auto"
+
+
+def _normalize_agent_type(agent_type: str) -> str:
+    return agent_type if agent_type in AGENT_ROLE_PROMPTS else "default"
+
+
+def _default_sandbox(agent_type: str) -> str:
+    return "read-only" if agent_type == "explorer" else "workspace-write"
+
+
+def _summarize_result(result: dict) -> str:
+    if "error" in result:
+        return str(result["error"])[:1200]
+    text = (
+        result.get("result")
+        or result.get("answer")
+        or result.get("message")
+        or ""
+    )
+    if isinstance(text, dict):
+        text = str(text)
+    return str(text).strip()[:1200]
+
+
+@dataclass
+class BackgroundAgentTurn:
+    prompt: str
+    success: bool
+    summary: str
+    finished_at: float
+    provider: str
+    model: str
+
+
+@dataclass
+class BackgroundAgentRecord:
+    agent_id: str
+    description: str
+    agent_type: str
+    provider: str
+    model: str
+    mode: str
+    sandbox: str
+    cwd: str | None
+    created_at: float
+    updated_at: float
+    status: str = "idle"
+    last_prompt: str = ""
+    last_summary: str = ""
+    last_result: dict = field(default_factory=dict)
+    last_success: bool | None = None
+    history: list[BackgroundAgentTurn] = field(default_factory=list)
+    current_task: asyncio.Task | None = field(default=None, repr=False)
+    closed: bool = False
+
+
+class BackgroundAgentManager:
+    def __init__(self, owner: "HelixAgent", max_agents: int = 16):
+        self.owner = owner
+        self.max_agents = max_agents
+        self._agents: dict[str, BackgroundAgentRecord] = {}
+        self._order: list[str] = []
+
+    def create(
+        self,
+        *,
+        description: str,
+        provider: str,
+        model: str,
+        mode: str,
+        agent_type: str,
+        sandbox: str,
+        cwd: str | None,
+    ) -> BackgroundAgentRecord:
+        normalized_type = _normalize_agent_type(agent_type)
+        now = time.time()
+        record = BackgroundAgentRecord(
+            agent_id=f"helix-{uuid.uuid4().hex[:8]}",
+            description=description.strip(),
+            agent_type=normalized_type,
+            provider=_normalize_provider(provider),
+            model=model,
+            mode=mode,
+            sandbox=sandbox or _default_sandbox(normalized_type),
+            cwd=cwd,
+            created_at=now,
+            updated_at=now,
+        )
+        self._agents[record.agent_id] = record
+        self._order.append(record.agent_id)
+        self._trim()
+        return record
+
+    def _trim(self) -> None:
+        if len(self._order) <= self.max_agents:
+            return
+        removable: list[str] = []
+        for agent_id in self._order:
+            record = self._agents.get(agent_id)
+            if not record:
+                removable.append(agent_id)
+                continue
+            if record.current_task is None and (record.closed or record.status in {"completed", "failed"}):
+                removable.append(agent_id)
+            if len(self._order) - len(removable) <= self.max_agents:
+                break
+        for agent_id in removable:
+            self._agents.pop(agent_id, None)
+            if agent_id in self._order:
+                self._order.remove(agent_id)
+
+    def get(self, agent_id: str) -> BackgroundAgentRecord | None:
+        return self._agents.get(agent_id)
+
+    def list_all(self) -> list[BackgroundAgentRecord]:
+        return [self._agents[agent_id] for agent_id in reversed(self._order) if agent_id in self._agents]
+
+    def snapshot(self, record: BackgroundAgentRecord) -> dict:
+        return {
+            "agent_id": record.agent_id,
+            "description": record.description,
+            "agent_type": record.agent_type,
+            "provider": record.provider,
+            "model": record.model,
+            "mode": record.mode,
+            "sandbox": record.sandbox,
+            "cwd": record.cwd,
+            "status": record.status,
+            "created_at": record.created_at,
+            "updated_at": record.updated_at,
+            "last_prompt": record.last_prompt,
+            "last_summary": record.last_summary,
+            "last_success": record.last_success,
+            "turns": len(record.history),
+            "closed": record.closed,
+        }
+
+    def _build_prompt(self, record: BackgroundAgentRecord, prompt: str) -> str:
+        sections = [AGENT_ROLE_PROMPTS[record.agent_type]]
+        if record.description:
+            sections.append(f"Agent description:\n{record.description}")
+        if record.history:
+            history_lines = []
+            for turn in record.history[-3:]:
+                history_lines.append(f"- Previous instruction: {turn.prompt[:300]}")
+                history_lines.append(f"  Result summary: {turn.summary[:500]}")
+            sections.append("Prior agent context:\n" + "\n".join(history_lines))
+        sections.append(f"Current assignment:\n{prompt.strip()}")
+        return "\n\n".join(sections)
+
+    async def _run_turn(self, record: BackgroundAgentRecord, prompt: str, timeout: int) -> None:
+        record.status = "running"
+        record.updated_at = time.time()
+        record.last_prompt = prompt
+        try:
+            result = await self.owner.run_assignment(
+                task=self._build_prompt(record, prompt),
+                provider=record.provider,
+                model=record.model,
+                mode=record.mode,
+                cwd=record.cwd,
+                sandbox=record.sandbox,
+                timeout=timeout,
+            )
+            success = "error" not in result
+            summary = _summarize_result(result)
+            provider = result.get("provider", record.provider)
+            model = result.get("model", record.model)
+            record.last_result = result
+            record.last_summary = summary
+            record.last_success = success
+            record.history.append(
+                BackgroundAgentTurn(
+                    prompt=prompt,
+                    success=success,
+                    summary=summary,
+                    finished_at=time.time(),
+                    provider=str(provider),
+                    model=str(model),
+                )
+            )
+            record.status = "completed" if success else "failed"
+            record.provider = str(provider)
+            record.model = str(model)
+        except asyncio.CancelledError:
+            record.status = "closed"
+            record.last_success = False
+            record.last_result = {"error": "Agent run was cancelled before completion."}
+            record.last_summary = "Agent run was cancelled before completion."
+            raise
+        finally:
+            record.updated_at = time.time()
+            record.current_task = None
+
+    def start(self, record: BackgroundAgentRecord, prompt: str, timeout: int) -> dict:
+        if record.closed:
+            raise ValueError("Agent is already closed.")
+        if record.current_task is not None:
+            raise ValueError("Agent is already running.")
+        record.status = "running"
+        record.updated_at = time.time()
+        record.last_prompt = prompt
+        record.current_task = asyncio.create_task(self._run_turn(record, prompt, timeout))
+        return self.snapshot(record)
+
+    async def wait(self, record: BackgroundAgentRecord, timeout: int) -> dict:
+        if record.current_task is None:
+            return self.snapshot(record)
+        try:
+            await asyncio.wait_for(asyncio.shield(record.current_task), timeout=timeout)
+        except asyncio.TimeoutError:
+            pass
+        return self.snapshot(record)
+
+    def close(self, record: BackgroundAgentRecord) -> dict:
+        if record.current_task is not None:
+            raise ValueError("Agent is still running. Wait for completion before closing it.")
+        record.closed = True
+        record.status = "closed"
+        record.updated_at = time.time()
+        return self.snapshot(record)
 
 
 class HelixAgent:
-    """Orchestrates task delegation to local Ollama models."""
+    """Orchestrates task delegation across multiple providers."""
 
     def __init__(self, config: AgentConfig | None = None):
         self.config = config or AgentConfig()
-        self.client = OllamaClient(
-            host=self.config.ollama_host,
-            timeout=self.config.ollama_timeout,
-        )
-        self.router = ModelRouter(self.client)
+        self._providers = {
+            "ollama": OllamaProvider(self.config),
+            "codex": CodexProvider(self.config),
+            "openai-compatible": OpenAICompatibleProvider(self.config),
+        }
+        # Backward-compatibility for older tests and callers.
+        self.client = self._providers["ollama"].client
+        self.router = self._providers["ollama"].router
+        self.background_agents = BackgroundAgentManager(self)
 
-    async def agent(
-        self,
-        task: str,
-        context: str = "",
-        model: str = "auto",
-        mode: str = "",
-        max_steps: int = 10,
-        tools: list[str] | None = None,
-        _on_progress=None,
-    ) -> dict:
-        """Run a ReAct agent loop: the local LLM reasons and acts iteratively."""
-        mode = mode or self.config.default_mode
+    def _get_provider(self, provider: str):
+        return self._providers[_normalize_provider(provider)] if provider in self._providers else None
 
-        # Model selection
-        if model == "auto":
-            try:
-                selected = await self.router.select_for_task(task, mode=mode)
-            except Exception:
-                return {"error": "Cannot connect to Ollama. Is it running?"}
-            if not selected:
-                return {"error": "No Ollama models available. Run: ollama pull gemma3"}
-        else:
-            selected = model
+    async def _resolve_provider(self, requested_provider: str, task: str = "", vision: bool = False) -> str:
+        provider = _normalize_provider(requested_provider)
+        if provider != "auto":
+            return provider
 
-        # Build tool registry (full set with file access)
-        registry = create_full_registry()
+        default_provider = _normalize_provider(self.config.default_provider)
+        if default_provider != "auto":
+            return default_provider
 
-        # Filter tools if specified
-        if tools:
-            from .tools import ToolRegistry
-            filtered = ToolRegistry()
-            for name in tools:
-                tool = registry.get(name)
-                if tool:
-                    filtered.register(tool)
-            registry = filtered
+        if vision:
+            return "ollama"
 
-        # Run ReAct loop
-        loop = ReactLoop(
-            client=self.client,
-            tools=registry,
-            max_steps=max_steps,
-        )
+        capability = _infer_capability(task) if task else Capability.REASONING
 
-        try:
-            result = await loop.run(
-                task=task,
-                model=selected,
-                context=context,
-                temperature=0.1,
-                on_progress=_on_progress,
-            )
-        except Exception as e:
-            return {"error": f"Agent loop failed: {e}", "model": selected}
+        if capability == Capability.CODE and (await self._providers["codex"].status()).available:
+            return "codex"
 
-        return result.to_dict()
+        if (await self._providers["ollama"].status()).available:
+            return "ollama"
+
+        if (await self._providers["openai-compatible"].status()).available:
+            return "openai-compatible"
+
+        if (await self._providers["codex"].status()).available:
+            return "codex"
+
+        return "ollama"
+
+    async def providers(self, action: str = "list", provider: str = "") -> dict:
+        if action == "use":
+            if provider not in SUPPORTED_PROVIDERS and provider != "auto":
+                return {
+                    "error": f"Unknown provider: {provider}",
+                    "supported": list(SUPPORTED_PROVIDERS) + ["auto"],
+                }
+            old = self.config.default_provider
+            self.config.default_provider = provider or "auto"
+            return {"updated": "default_provider", "old": old, "new": self.config.default_provider}
+
+        if action == "show":
+            return {"default_provider": self.config.default_provider, "supported": list(SUPPORTED_PROVIDERS)}
+
+        statuses = []
+        for name, runtime in self._providers.items():
+            statuses.append((await runtime.status()).to_dict())
+        return {"default_provider": self.config.default_provider, "providers": statuses}
 
     async def think(
         self,
@@ -94,321 +351,199 @@ class HelixAgent:
         context: str = "",
         model: str = "auto",
         mode: str = "",
+        provider: str = "auto",
+        cwd: str | None = None,
+        sandbox: str = "",
+        timeout: int | None = None,
     ) -> dict:
-        """Delegate a reasoning/analysis/code task to a local Ollama model."""
         mode = mode or self.config.default_mode
+        resolved = await self._resolve_provider(provider, task=task)
+        runtime = self._providers[resolved]
 
-        # Model selection
-        if model == "auto":
-            try:
-                selected = await self.router.select_for_task(task, mode=mode)
-            except Exception:
-                return {"error": "Cannot connect to Ollama. Is it running? (ollama serve)"}
-            if not selected:
-                return {"error": "No Ollama models available. Run: ollama pull gemma3"}
-        else:
-            selected = model
-
-        # Build messages
-        system_prompt = self._build_system_prompt(mode)
-        user_content = task
-        if context:
-            user_content = f"{task}\n\n---\nContext:\n{context}"
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ]
-
-        # Temperature based on mode
-        temperature = {"quality": 0.3, "fast": 0.5, "creative": 0.9}.get(mode, 0.5)
-
-        try:
-            result = await self.client.chat(
-                model=selected,
-                messages=messages,
-                temperature=temperature,
+        if resolved == "codex":
+            return await runtime.think(
+                task,
+                context=context,
+                model=model,
+                mode=mode,
+                cwd=cwd,
+                sandbox=sandbox,
+                timeout=timeout or self.config.codex_timeout,
             )
-        except Exception as e:
-            return {"error": f"Ollama request failed: {e}", "model": selected}
 
-        return {
-            "result": result,
-            "model": selected,
-            "mode": mode,
-            "task": task[:100],
-        }
+        return await runtime.think(task, context=context, model=model, mode=mode)
+
+    async def agent(
+        self,
+        task: str,
+        context: str = "",
+        model: str = "auto",
+        mode: str = "",
+        provider: str = "auto",
+        max_steps: int = 10,
+        tools: list[str] | None = None,
+        _on_progress=None,
+        cwd: str | None = None,
+        sandbox: str = "",
+        timeout: int | None = None,
+    ) -> dict:
+        mode = mode or self.config.default_mode
+        resolved = await self._resolve_provider(provider, task=task)
+        runtime = self._providers[resolved]
+
+        if resolved == "codex":
+            return await runtime.agent(
+                task,
+                context=context,
+                model=model,
+                mode=mode,
+                max_steps=max_steps,
+                tools=tools,
+                on_progress=_on_progress,
+                cwd=cwd,
+                sandbox=sandbox,
+                timeout=timeout or self.config.codex_timeout,
+            )
+
+        return await runtime.agent(
+            task,
+            context=context,
+            model=model,
+            mode=mode,
+            max_steps=max_steps,
+            tools=tools,
+            on_progress=_on_progress,
+        )
 
     async def see(
         self,
         image_path: str,
         question: str = "Describe what you see in this image in detail.",
         model: str = "auto",
+        provider: str = "auto",
     ) -> dict:
-        """Analyze an image using a local Vision LLM."""
-        import base64
-        from pathlib import Path
+        resolved = await self._resolve_provider(provider, vision=True)
+        runtime = self._providers[resolved]
+        return await runtime.see(image_path, question=question, model=model)
 
-        # Model selection
-        if model == "auto":
-            selected = await self.router.select(Capability.VISION)
-            if not selected:
-                return {"error": "No Vision model available. Run: ollama pull mistral-small3.2"}
-        else:
-            selected = model
+    async def models(self, action: str = "list", model_name: str = "", provider: str = "auto") -> dict:
+        resolved = await self._resolve_provider(provider)
+        runtime = self._providers[resolved]
+        return await runtime.models(action=action, model_name=model_name)
 
-        # Load image
-        path = Path(image_path)
-        if not path.exists():
-            return {"error": f"Image not found: {image_path}"}
+    async def run_assignment(
+        self,
+        *,
+        task: str,
+        provider: str = "auto",
+        model: str = "auto",
+        mode: str = "",
+        cwd: str | None = None,
+        sandbox: str = "",
+        timeout: int | None = None,
+    ) -> dict:
+        return await self.think(
+            task=task,
+            model=model,
+            mode=mode,
+            provider=provider,
+            cwd=cwd,
+            sandbox=sandbox,
+            timeout=timeout,
+        )
 
-        image_data = base64.b64encode(path.read_bytes()).decode("utf-8")
+    def spawn_background_agent(
+        self,
+        *,
+        description: str,
+        provider: str = "auto",
+        model: str = "auto",
+        mode: str = "",
+        agent_type: str = "default",
+        sandbox: str = "",
+        cwd: str | None = None,
+        initial_task: str = "",
+        timeout: int | None = None,
+    ) -> dict:
+        record = self.background_agents.create(
+            description=description,
+            provider=provider,
+            model=model,
+            mode=mode or self.config.default_mode,
+            agent_type=agent_type,
+            sandbox=sandbox,
+            cwd=cwd,
+        )
+        snapshot = self.background_agents.snapshot(record)
+        if initial_task:
+            self.background_agents.start(record, initial_task, timeout or self.config.codex_timeout)
+            snapshot = self.background_agents.snapshot(record)
+        return snapshot
 
-        try:
-            result = await self.client.chat_vision(
-                model=selected,
-                prompt=question,
-                images=[image_data],
-                temperature=0.3,
-            )
-        except Exception as e:
-            return {"error": f"Vision request failed: {e}", "model": selected}
+    def send_background_agent_input(self, agent_id: str, message: str, timeout: int | None = None) -> dict:
+        record = self.background_agents.get(agent_id)
+        if not record:
+            raise ValueError(f"Unknown agent_id: {agent_id}")
+        return self.background_agents.start(record, message, timeout or self.config.codex_timeout)
 
-        return {
-            "result": result,
-            "model": selected,
-            "image": image_path,
-        }
+    async def wait_background_agent(self, agent_id: str, timeout: int = 30) -> dict:
+        record = self.background_agents.get(agent_id)
+        if not record:
+            raise ValueError(f"Unknown agent_id: {agent_id}")
+        return await self.background_agents.wait(record, timeout)
 
-    async def models(self, action: str = "list", model_name: str = "") -> dict:
-        """Get information about available Ollama models."""
-        available = await self.client.is_available()
-        if not available:
-            return {"error": "Ollama is not running. Start with: ollama serve"}
+    def list_background_agents(self) -> dict:
+        return {"agents": [self.background_agents.snapshot(record) for record in self.background_agents.list_all()]}
 
-        if action == "status":
-            return {"status": "connected", "host": self.config.ollama_host}
-
-        if action == "use":
-            if not model_name:
-                return {"error": "model_name is required for 'use' action"}
-            self.router.set_model_override(model_name)
-            return {"model_override": model_name, "message": f"All requests will now use: {model_name}"}
-
-        if action == "use_auto":
-            self.router.set_model_override(None)
-            return {"model_override": None, "message": "Switched back to auto-selection"}
-
-        if action == "probe":
-            await self.router.refresh()
-            results = await self.router.probe_models()
-            summary = []
-            for name, ok in results.items():
-                info = self.router._models.get(name)
-                entry = {"name": name, "available": ok}
-                if info and info.avg_response_sec:
-                    entry["response_sec"] = info.avg_response_sec
-                if info:
-                    entry["size_gb"] = round(info.size_gb, 1)
-                summary.append(entry)
-            available_count = sum(1 for v in results.values() if v)
-            return {
-                "probed": len(results),
-                "available": available_count,
-                "unavailable": len(results) - available_count,
-                "models": summary,
-            }
-
-        if action == "benchmark":
-            return await self._run_benchmark(model_name)
-
-        if action == "benchmark_status":
-            return self._benchmark_status()
-
-        fetch_meta = action == "detailed"
-        await self.router.refresh(fetch_metadata=fetch_meta)
-
-        if action == "capabilities":
-            cap_map = await self.router.get_capabilities_map()
-            return {"capabilities": cap_map}
-
-        # Default: list (include benchmark scores if available)
-        models_list = []
-        for info in self.router.get_all_models():
-            entry = {
-                "name": info.name,
-                "size_gb": round(info.size_gb, 1),
-                "parameters": info.parameter_size,
-                "param_billions": info.param_billions,
-                "family": info.family,
-                "capabilities": [c.value for c in info.capabilities],
-            }
-            if info.context_length:
-                entry["context_length"] = info.context_length
-            # Add benchmark score if available
-            bm = self.router.benchmark_engine.get_cached(info.name)
-            if bm:
-                entry["benchmark_score"] = bm.total_score
-                entry["benchmark_categories"] = bm.category_scores
-            models_list.append(entry)
-
-        result = {"models": models_list, "count": len(models_list)}
-
-        # Show override status
-        override = self.router.get_model_override()
-        if override:
-            result["model_override"] = override
-
-        return result
-
-    async def _run_benchmark(self, model_name: str = "") -> dict:
-        """Run benchmarks on specified model or all unbenchmarked models.
-
-        Includes preflight VRAM check, adaptive timeout, warmup, and lite mode
-        for large models (>30GB).
-        """
-        from .benchmark import preflight_check
-
-        await self.router.refresh()
-        engine = self.router.benchmark_engine
-        all_models = [info.name for info in self.router.get_all_models()
-                       if Capability.EMBEDDING not in info.capabilities
-                       or len(info.capabilities) > 1]
-
-        if model_name:
-            targets = [model_name]
-        else:
-            targets = engine.get_unbenchmarked(all_models)
-            if not targets:
-                return {
-                    "message": "All models already benchmarked",
-                    "benchmarked": len(engine.get_all_cached()),
-                    "hint": "Use model_name to re-benchmark a specific model",
-                }
-
-        results = []
-        for target in targets:
-            info = self.router._models.get(target)
-            if info and Capability.EMBEDDING in info.capabilities and len(info.capabilities) == 1:
-                continue
-
-            size_gb = info.size_gb if info else 0.0
-
-            # Preflight VRAM check for large models
-            if size_gb > 30:
-                check = preflight_check(size_gb)
-                if not check["can_run"]:
-                    results.append({
-                        "model": target,
-                        "skipped": True,
-                        "reason": check["reason"],
-                        "size_gb": round(size_gb, 1),
-                    })
-                    continue
-
-            # Use lite mode for large models (>30GB)
-            use_lite = size_gb > 30
-
-            try:
-                bm = await engine.run_benchmark(
-                    target,
-                    model_size_gb=size_gb,
-                    lite=use_lite,
-                    warmup=True,
-                )
-
-                entry = {
-                    "model": target,
-                    "total_score": bm.total_score,
-                    "categories": bm.category_scores,
-                    "avg_tps": bm.avg_tokens_per_sec,
-                    "size_gb": round(size_gb, 1),
-                }
-                if use_lite:
-                    entry["mode"] = "lite"
-                # Check if warmup failed
-                if bm.results and isinstance(bm.results[0], dict) and bm.results[0].get("warmup_failed"):
-                    entry["warmup_failed"] = True
-                    entry["error"] = bm.results[0].get("error", "warmup failed")
-                results.append(entry)
-            except Exception as e:
-                results.append({
-                    "model": target,
-                    "error": str(e),
-                    "size_gb": round(size_gb, 1),
-                })
-
-        return {
-            "benchmarked": len(results),
-            "results": results,
-            "total_cached": len(engine.get_all_cached()),
-        }
-
-    def _benchmark_status(self) -> dict:
-        """Get current benchmark status."""
-        engine = self.router.benchmark_engine
-        cached = engine.get_all_cached()
-
-        models_summary = []
-        for name, bm in cached.items():
-            models_summary.append({
-                "model": name,
-                "total_score": bm.total_score,
-                "categories": bm.category_scores,
-                "avg_tps": bm.avg_tokens_per_sec,
-                "timestamp": bm.timestamp,
-            })
-
-        # Sort by total score descending
-        models_summary.sort(key=lambda x: x["total_score"], reverse=True)
-
-        override = self.router.get_model_override()
-        result = {
-            "benchmarked_models": len(cached),
-            "ranking": models_summary,
-        }
-        if override:
-            result["model_override"] = override
-        return result
+    def close_background_agent(self, agent_id: str) -> dict:
+        record = self.background_agents.get(agent_id)
+        if not record:
+            raise ValueError(f"Unknown agent_id: {agent_id}")
+        return self.background_agents.close(record)
 
     async def config_action(self, action: str = "show", key: str = "", value: str = "") -> dict:
-        """View or update agent configuration."""
         if action == "show":
             return {
-                "ollama_host": self.config.ollama_host,
+                "default_provider": self.config.default_provider,
                 "default_mode": self.config.default_mode,
                 "max_output_tokens": self.config.max_output_tokens,
                 "result_summary": self.config.result_summary,
+                "ollama_host": self.config.ollama_host,
+                "ollama_timeout": self.config.ollama_timeout,
+                "codex_model": self.config.codex_model,
+                "codex_sandbox": self.config.codex_sandbox,
+                "codex_timeout": self.config.codex_timeout,
+                "openai_base_url": self.config.openai_base_url,
+                "openai_api_key_env": self.config.openai_api_key_env,
+                "openai_model": self.config.openai_model,
+                "openai_timeout": self.config.openai_timeout,
             }
-        elif action == "set":
-            if not key:
-                return {"error": "key is required for 'set' action"}
-            if hasattr(self.config, key):
-                old = getattr(self.config, key)
-                # Type coercion
-                if isinstance(old, bool):
-                    setattr(self.config, key, value.lower() in ("true", "1", "yes"))
-                elif isinstance(old, int):
-                    setattr(self.config, key, int(value))
-                elif isinstance(old, float):
-                    setattr(self.config, key, float(value))
-                else:
-                    setattr(self.config, key, value)
-                return {"updated": key, "old": str(old), "new": value}
-            return {"error": f"Unknown config key: {key}"}
-        return {"error": f"Unknown action: {action}"}
 
-    def _build_system_prompt(self, mode: str) -> str:
-        base = (
-            "You are a helpful local AI assistant running via Ollama. "
-            "Your output will be reviewed by a more capable AI (Claude), "
-            "so focus on accuracy and useful content rather than politeness. "
-            "Be concise and direct."
-        )
-        if mode == "quality":
-            return base + " Prioritize accuracy and thoroughness. Think step by step if needed."
-        elif mode == "fast":
-            return base + " Be extremely brief. One paragraph max."
-        elif mode == "creative":
-            return base + " Be creative and explore unconventional ideas."
-        return base
+        if action != "set":
+            return {"error": f"Unknown action: {action}"}
+        if not key:
+            return {"error": "key is required for 'set' action"}
+        if not hasattr(self.config, key):
+            return {"error": f"Unknown config key: {key}"}
+
+        old = getattr(self.config, key)
+        if isinstance(old, bool):
+            new_value = value.lower() in ("true", "1", "yes")
+        elif isinstance(old, int):
+            new_value = int(value)
+        elif isinstance(old, float):
+            new_value = float(value)
+        else:
+            new_value = value
+        setattr(self.config, key, new_value)
+
+        if key in {"ollama_host", "ollama_timeout"}:
+            self._providers["ollama"] = OllamaProvider(self.config)
+            self.client = self._providers["ollama"].client
+            self.router = self._providers["ollama"].router
+        elif key in {"openai_base_url", "openai_api_key", "openai_api_key_env", "openai_model", "openai_timeout"}:
+            self._providers["openai-compatible"] = OpenAICompatibleProvider(self.config)
+        elif key in {"codex_model", "codex_sandbox", "codex_timeout"}:
+            self._providers["codex"] = CodexProvider(self.config)
+
+        return {"updated": key, "old": str(old), "new": str(new_value)}
