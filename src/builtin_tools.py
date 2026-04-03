@@ -2,15 +2,31 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import subprocess
 from pathlib import Path
 
 from .pathguard import PathGuard
+from .qdrant_memory import QdrantMemory, QdrantMemoryConfig
 from .tools import Tool, ToolRegistry
 
 _guard = PathGuard()
+_memory = QdrantMemory(QdrantMemoryConfig())
+
+MAX_FORK_DEPTH = 2
+_current_fork_depth = 0
+
+_computer_use_handler = None
+
+
+def _get_computer_use_handler():
+    global _computer_use_handler
+    if _computer_use_handler is None:
+        from .computer_use import ComputerUseHandler
+        _computer_use_handler = ComputerUseHandler()
+    return _computer_use_handler
 
 
 # --- File tools ---
@@ -132,11 +148,56 @@ async def _tool_calculate(expression: str) -> str:
         return f"Error: {e}"
 
 
-# --- Memory (placeholder for Qdrant) ---
+# --- Memory (Qdrant shared memory) ---
 
-async def _tool_search_memory(query: str) -> str:
+async def _tool_search_memory(params: str) -> str:
     """Search shared memory (Qdrant) for relevant information."""
-    return f"Memory search not yet connected. Query: {query}"
+    try:
+        data = json.loads(params)
+        query = data.get("query", params)
+        top_k = data.get("top_k", 5)
+    except (json.JSONDecodeError, AttributeError):
+        query = params
+        top_k = 5
+
+    try:
+        hits = await _memory.search(query, top_k=top_k)
+    except Exception as e:
+        return f"Memory search error: {e}"
+
+    if not hits:
+        return f"No memories found for: {query}"
+
+    lines = []
+    for i, hit in enumerate(hits, 1):
+        text = hit["text"]
+        score = hit["score"]
+        source = hit.get("source", "")
+        lines.append(f"[{i}] (score={score}) {text}")
+        if source:
+            lines[-1] += f" [source: {source}]"
+    return "\n".join(lines)
+
+
+async def _tool_add_memory(params: str) -> str:
+    """Add a memory to shared Qdrant storage."""
+    try:
+        data = json.loads(params)
+        text = data.get("text", "")
+        metadata = {k: v for k, v in data.items() if k != "text"}
+    except (json.JSONDecodeError, AttributeError):
+        text = params
+        metadata = {}
+
+    if not text:
+        return "Error: 'text' is required"
+
+    try:
+        point_id = await _memory.add(text, metadata=metadata or None)
+    except Exception as e:
+        return f"Memory add error: {e}"
+
+    return f"Memory saved (id={point_id})"
 
 
 # --- Shell (restricted) ---
@@ -175,8 +236,143 @@ async def _tool_run_command(command: str) -> str:
         return f"Error: {e}"
 
 
+async def _tool_fork_task(params: str) -> str:
+    """Fork a sub-task with context inheritance (Claude Code forkSubagent pattern)."""
+    global _current_fork_depth
+
+    try:
+        data = json.loads(params)
+    except (json.JSONDecodeError, AttributeError):
+        return "Error: Input must be JSON with 'task' key"
+
+    task = data.get("task", "")
+    if not task:
+        return "Error: 'task' is required"
+
+    if _current_fork_depth >= MAX_FORK_DEPTH:
+        return f"Error: Max fork depth ({MAX_FORK_DEPTH}) reached. Cannot fork further."
+
+    context = data.get("context", "")
+    scope = data.get("scope", "")
+    tools_filter = data.get("tools", [])
+
+    from .ollama_client import OllamaClient
+    from .react_loop import ReactLoop
+    from .router import ModelRouter
+
+    client = OllamaClient()
+    router = ModelRouter(client)
+    model = await router.select_for_task(task, mode="fast")
+    if not model:
+        return "Error: No Ollama models available for fork_task"
+
+    registry = create_full_registry()
+    if tools_filter:
+        filtered = ToolRegistry()
+        for name in tools_filter:
+            tool = registry.get(name)
+            if tool:
+                filtered.register(tool)
+        registry = filtered
+
+    fork_context = ""
+    if context:
+        fork_context += f"Parent context:\n{context}\n\n"
+    if scope:
+        fork_context += f"Scope: {scope}\n\n"
+
+    loop = ReactLoop(
+        client=client,
+        tools=registry,
+        max_steps=10,
+    )
+
+    _current_fork_depth += 1
+    try:
+        result = await loop.run(
+            task=task,
+            model=model,
+            context=fork_context,
+            temperature=0.1,
+        )
+    finally:
+        _current_fork_depth -= 1
+
+    response_parts = []
+    if scope:
+        response_parts.append(f"Scope: {scope}")
+    response_parts.append(f"Result: {result.answer}")
+
+    key_files = set()
+    files_changed = set()
+    issues = []
+    for step in result.steps:
+        if step.action == "read_file":
+            key_files.add(step.action_input.strip())
+        elif step.action == "search_in_file":
+            try:
+                d = json.loads(step.action_input)
+                key_files.add(d.get("path", ""))
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        elif step.action == "write_file":
+            try:
+                d = json.loads(step.action_input)
+                files_changed.add(d.get("path", ""))
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        if step.observation.startswith("Error"):
+            issues.append(step.observation[:200])
+
+    if key_files:
+        response_parts.append(f"Key files: {', '.join(f for f in key_files if f)}")
+    if files_changed:
+        response_parts.append(f"Files changed: {', '.join(f for f in files_changed if f)}")
+    if issues:
+        response_parts.append(f"Issues: {'; '.join(issues[:3])}")
+
+    return "\n".join(response_parts)
+
+
+async def _tool_computer_use(params: str) -> str:
+    """Execute a computer use action (screenshot, click, type, scroll, read_page, navigate)."""
+    try:
+        data = json.loads(params)
+    except (json.JSONDecodeError, AttributeError):
+        return 'Error: Input must be JSON with "action" key'
+
+    action = data.get("action", "")
+    if not action:
+        return "Error: 'action' is required"
+
+    handler = _get_computer_use_handler()
+    result = await handler.execute(data)
+    if "error" in result:
+        return f"Error: {result['error']}"
+    return json.dumps(result, ensure_ascii=False)
+
+
+async def _tool_browse(params: str) -> str:
+    """Browse a URL and extract page text."""
+    try:
+        data = json.loads(params)
+    except (json.JSONDecodeError, AttributeError):
+        return 'Error: Input must be JSON with "url" key'
+
+    url = data.get("url", "")
+    if not url:
+        return "Error: 'url' is required"
+
+    task = data.get("task", "")
+    handler = _get_computer_use_handler()
+    result = await handler.browse(url, task=task)
+    if "error" in result:
+        return f"Error: {result['error']}"
+    return json.dumps(result, ensure_ascii=False)
+
+
 def create_full_registry() -> ToolRegistry:
-    """Create a registry with all built-in tools (Phase 2)."""
+    """Create a registry with all built-in tools (Phase 3)."""
     registry = ToolRegistry()
 
     registry.register(Tool(
@@ -184,6 +380,7 @@ def create_full_registry() -> ToolRegistry:
         description="Evaluate a math expression (e.g., '2+3*4')",
         parameters={"expression": "math expression string"},
         handler=_tool_calculate,
+        is_read_only=True,
     ))
 
     registry.register(Tool(
@@ -191,6 +388,7 @@ def create_full_registry() -> ToolRegistry:
         description="Read the contents of a file",
         parameters={"path": "absolute file path"},
         handler=_tool_read_file,
+        is_read_only=True,
     ))
 
     registry.register(Tool(
@@ -198,6 +396,7 @@ def create_full_registry() -> ToolRegistry:
         description="Write content to a file. Input must be JSON: {\"path\": \"...\", \"content\": \"...\"}",
         parameters={"json": "{path, content}"},
         handler=_tool_write_file,
+        is_read_only=False,
     ))
 
     registry.register(Tool(
@@ -205,6 +404,7 @@ def create_full_registry() -> ToolRegistry:
         description="List files and directories at a path",
         parameters={"path": "absolute directory path"},
         handler=_tool_list_files,
+        is_read_only=True,
     ))
 
     registry.register(Tool(
@@ -212,6 +412,7 @@ def create_full_registry() -> ToolRegistry:
         description="Search for a regex pattern in a file. Input: JSON {\"path\": \"...\", \"pattern\": \"...\"}",
         parameters={"json": "{path, pattern}"},
         handler=_tool_search_in_file,
+        is_read_only=True,
     ))
 
     registry.register(Tool(
@@ -219,13 +420,67 @@ def create_full_registry() -> ToolRegistry:
         description="Run a shell command (git, python, uv, ollama, ls only)",
         parameters={"command": "shell command string"},
         handler=_tool_run_command,
+        is_read_only=False,
     ))
 
     registry.register(Tool(
         name="search_memory",
-        description="Search shared memory (Qdrant) for relevant past decisions",
-        parameters={"query": "search query string"},
+        description="Search shared memory (Qdrant) for relevant past decisions. Input: JSON {\"query\": \"...\", \"top_k\": 5} or plain query string",
+        parameters={"json_or_query": "{query, top_k?} or plain string"},
         handler=_tool_search_memory,
+        is_read_only=True,
+    ))
+
+    registry.register(Tool(
+        name="add_memory",
+        description="Save information to shared memory (Qdrant). Input: JSON {\"text\": \"...\"}",
+        parameters={"json_or_text": "{text} or plain string"},
+        handler=_tool_add_memory,
+        is_read_only=False,
+    ))
+
+    registry.register(Tool(
+        name="fork_task",
+        description="Fork a sub-task with context inheritance. Input: JSON {\"task\": \"...\", \"context\": \"parent context\", \"scope\": \"target files/range\", \"tools\": [\"read_file\", \"search_in_file\"]}",
+        parameters={"json": "{task, context?, scope?, tools?}"},
+        handler=_tool_fork_task,
+        is_read_only=True,
+    ))
+
+    registry.register(Tool(
+        name="computer_use",
+        description="Interact with desktop/browser: screenshot, click, type, scroll, read_page, navigate. Input: JSON {\"action\": \"...\", \"target\": \"...\", \"value\": \"...\", \"url\": \"...\", \"analyze\": true, \"prompt\": \"...\"}",
+        parameters={"json": "{action, target?, value?, url?, analyze?, prompt?}"},
+        handler=_tool_computer_use,
+        json_schema={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["screenshot", "click", "type", "scroll", "read_page", "navigate"]},
+                "target": {"type": "string", "description": "CSS selector or element description"},
+                "value": {"type": "string", "description": "Text to type or scroll direction (up/down)"},
+                "url": {"type": "string", "description": "URL for navigate action"},
+                "analyze": {"type": "boolean", "description": "Run Vision analysis on screenshot"},
+                "prompt": {"type": "string", "description": "Vision analysis prompt"},
+            },
+            "required": ["action"],
+        },
+        is_read_only=True,
+    ))
+
+    registry.register(Tool(
+        name="browse",
+        description="Open a URL and extract page text. Input: JSON {\"url\": \"...\", \"task\": \"...\"}",
+        parameters={"json": "{url, task?}"},
+        handler=_tool_browse,
+        json_schema={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "URL to browse"},
+                "task": {"type": "string", "description": "What to do with the page content"},
+            },
+            "required": ["url"],
+        },
+        is_read_only=True,
     ))
 
     return registry

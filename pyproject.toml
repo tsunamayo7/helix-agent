@@ -1,7 +1,7 @@
 [project]
 name = "helix-agent"
-version = "0.5.0"
-description = "Claude Code extension MCP server for multi-provider agents including Ollama, Codex, and OpenAI-compatible APIs"
+version = "0.9.0"
+description = "Claude Code extension MCP server for multi-provider agents including Ollama, Codex, OpenAI-compatible APIs, and Computer Use"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 memory = ["qdrant-client>=1.12"]
+browser = ["playwright>=1.40"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",

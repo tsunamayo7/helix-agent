@@ -14,13 +14,42 @@ class Tool:
 
     name: str
     description: str
-    parameters: dict[str, str]  # param_name -> description
+    parameters: dict[str, str]  # param_name -> description (for prompt)
     handler: Callable[..., Awaitable[str]]
+    json_schema: dict[str, Any] | None = None  # OpenAI function calling schema
+    is_read_only: bool = False
 
     def schema_for_prompt(self) -> str:
         """Format tool info for inclusion in the system prompt."""
         params = ", ".join(f"{k}: {v}" for k, v in self.parameters.items())
         return f"- {self.name}({params}): {self.description}"
+
+    def to_ollama_tool(self) -> dict[str, Any]:
+        """Convert to Ollama/OpenAI function calling format."""
+        if self.json_schema:
+            return {
+                "type": "function",
+                "function": {
+                    "name": self.name,
+                    "description": self.description,
+                    "parameters": self.json_schema,
+                },
+            }
+        properties = {}
+        for param_name, param_desc in self.parameters.items():
+            properties[param_name] = {"type": "string", "description": param_desc}
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": list(self.parameters.keys()),
+                },
+            },
+        }
 
 
 class ToolRegistry:
@@ -59,6 +88,10 @@ class ToolRegistry:
         lines = [t.schema_for_prompt() for t in self._tools.values()]
         return "\n".join(lines)
 
+    def to_ollama_tools(self) -> list[dict[str, Any]]:
+        """Generate Ollama/OpenAI function calling tool list."""
+        return [t.to_ollama_tool() for t in self._tools.values()]
+
 
 # --- Built-in tools (minimal set for Phase 1) ---
 
@@ -80,7 +113,11 @@ async def _tool_search_text(query: str) -> str:
 
 
 def create_default_registry() -> ToolRegistry:
-    """Create a registry with the default built-in tools."""
+    """Create a registry with the default built-in tools.
+
+    NOTE: This is a minimal registry. For full Qdrant-backed memory,
+    use create_full_registry() from builtin_tools.
+    """
     registry = ToolRegistry()
 
     registry.register(Tool(

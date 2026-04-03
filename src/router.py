@@ -59,7 +59,7 @@ _CAPABILITY_PATTERNS: dict[Capability, list[str]] = {
         r"code-?llama", r"granite-code", r"yi-coder",
     ],
     Capability.VISION: [
-        r"mistral-small3\.2", r"gemma3", r"moondream", r"llava",
+        r"mistral-small3\.2", r"gemma4", r"gemma3", r"moondream", r"llava",
         r"bakllava", r"llama3\.2-vision", r"minicpm-v",
     ],
     Capability.EMBEDDING: [
@@ -86,6 +86,7 @@ _PRIORITY_BOOST: dict[str, dict[Capability, int]] = {
     "devstral": {Capability.CODE: 9},
     "deepseek-coder": {Capability.CODE: 8},
     "mistral-small3.2": {Capability.VISION: 10, Capability.REASONING: 7},
+    "gemma4": {Capability.REASONING: 9, Capability.CODE: 8, Capability.VISION: 9, Capability.CREATIVE: 8},
     "gemma3": {Capability.VISION: 8, Capability.CREATIVE: 7},
     "moondream": {Capability.VISION: 6},
     "qwen3-embedding": {Capability.EMBEDDING: 10},

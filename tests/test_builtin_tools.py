@@ -2,6 +2,7 @@
 
 import json
 import pytest
+from unittest.mock import AsyncMock, patch
 
 from src.pathguard import PathGuard
 from src.builtin_tools import (
@@ -9,6 +10,8 @@ from src.builtin_tools import (
     _tool_list_files,
     _tool_read_file,
     _tool_search_in_file,
+    _tool_search_memory,
+    _tool_add_memory,
     _tool_write_file,
     create_full_registry,
 )
@@ -163,6 +166,61 @@ class TestSearchInFileTool:
         assert "Error" in result
 
 
+class TestMemoryTools:
+    @pytest.mark.asyncio
+    async def test_search_memory_with_json(self):
+        mock_hits = [
+            {"text": "test memory", "score": 0.95, "created_at": "", "source": "test"}
+        ]
+        with patch("src.builtin_tools._memory") as mock_mem:
+            mock_mem.search = AsyncMock(return_value=mock_hits)
+            result = await _tool_search_memory(json.dumps({"query": "test", "top_k": 3}))
+            assert "test memory" in result
+            assert "0.95" in result
+            mock_mem.search.assert_called_once_with("test", top_k=3)
+
+    @pytest.mark.asyncio
+    async def test_search_memory_with_plain_string(self):
+        with patch("src.builtin_tools._memory") as mock_mem:
+            mock_mem.search = AsyncMock(return_value=[])
+            result = await _tool_search_memory("test query")
+            assert "No memories found" in result
+
+    @pytest.mark.asyncio
+    async def test_search_memory_error(self):
+        with patch("src.builtin_tools._memory") as mock_mem:
+            mock_mem.search = AsyncMock(side_effect=RuntimeError("connection failed"))
+            result = await _tool_search_memory("test")
+            assert "Memory search error" in result
+
+    @pytest.mark.asyncio
+    async def test_add_memory_with_json(self):
+        with patch("src.builtin_tools._memory") as mock_mem:
+            mock_mem.add = AsyncMock(return_value="abc-123")
+            result = await _tool_add_memory(json.dumps({"text": "remember this"}))
+            assert "abc-123" in result
+            mock_mem.add.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_add_memory_with_plain_string(self):
+        with patch("src.builtin_tools._memory") as mock_mem:
+            mock_mem.add = AsyncMock(return_value="xyz-789")
+            result = await _tool_add_memory("plain text memory")
+            assert "xyz-789" in result
+
+    @pytest.mark.asyncio
+    async def test_add_memory_empty_text(self):
+        result = await _tool_add_memory(json.dumps({"text": ""}))
+        assert "Error" in result
+
+    @pytest.mark.asyncio
+    async def test_add_memory_error(self):
+        with patch("src.builtin_tools._memory") as mock_mem:
+            mock_mem.add = AsyncMock(side_effect=RuntimeError("failed"))
+            result = await _tool_add_memory("test")
+            assert "Memory add error" in result
+
+
 class TestFullRegistry:
     def test_all_tools_registered(self):
         registry = create_full_registry()
@@ -174,4 +232,8 @@ class TestFullRegistry:
         assert "search_in_file" in names
         assert "run_command" in names
         assert "search_memory" in names
-        assert len(names) == 7
+        assert "add_memory" in names
+        assert "fork_task" in names
+        assert "computer_use" in names
+        assert "browse" in names
+        assert len(names) == 11

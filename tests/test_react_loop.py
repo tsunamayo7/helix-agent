@@ -5,8 +5,27 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from src.ollama_client import ChatResponse
 from src.react_loop import AgentResult, AgentStep, ReactLoop
 from src.tools import Tool, ToolRegistry, create_default_registry
+
+
+def _mock_client_with_responses(responses: list[str]) -> AsyncMock:
+    """Create a mock OllamaClient that returns ChatResponse objects."""
+    client = AsyncMock()
+    client.timeout = 60.0
+    client._context_lengths = {}
+    client.get_context_length = AsyncMock(return_value=8192)
+    it = iter(responses)
+
+    async def _chat_usage(**kwargs):
+        return ChatResponse(content=next(it), input_tokens=10, output_tokens=5)
+
+    client.chat_with_usage = AsyncMock(side_effect=_chat_usage)
+    # Also set chat for backward compat (retry path)
+    it2 = iter(responses)
+    client.chat = AsyncMock(side_effect=lambda **kwargs: next(it2))
+    return client
 
 
 # --- ToolRegistry tests ---
@@ -94,13 +113,12 @@ class TestReactLoop:
     @pytest.mark.asyncio
     async def test_simple_finish(self):
         """LLM immediately returns a finish action."""
-        client = AsyncMock()
-        client.timeout = 60.0
-        client.chat = AsyncMock(return_value=json.dumps({
+        resp = json.dumps({
             "thought": "The answer is 42",
             "action": "finish",
             "action_input": "42",
-        }))
+        })
+        client = _mock_client_with_responses([resp])
 
         registry = create_default_registry()
         loop = ReactLoop(client=client, tools=registry, max_steps=5)
@@ -115,9 +133,7 @@ class TestReactLoop:
     @pytest.mark.asyncio
     async def test_tool_use_then_finish(self):
         """LLM uses a tool, then finishes."""
-        client = AsyncMock()
-        client.timeout = 60.0
-        responses = iter([
+        responses = [
             json.dumps({
                 "thought": "I need to calculate 10 * 5",
                 "action": "calculate",
@@ -128,8 +144,8 @@ class TestReactLoop:
                 "action": "finish",
                 "action_input": "10 * 5 = 50",
             }),
-        ])
-        client.chat = AsyncMock(side_effect=lambda **kwargs: next(responses))
+        ]
+        client = _mock_client_with_responses(responses)
 
         registry = create_default_registry()
         loop = ReactLoop(client=client, tools=registry, max_steps=5)
@@ -145,13 +161,13 @@ class TestReactLoop:
     @pytest.mark.asyncio
     async def test_max_steps_reached(self):
         """Loop reaches max_steps without finishing."""
-        client = AsyncMock()
-        client.timeout = 60.0
-        client.chat = AsyncMock(return_value=json.dumps({
+        resp = json.dumps({
             "thought": "Keep going",
             "action": "calculate",
             "action_input": "1+1",
-        }))
+        })
+        # Need enough responses for 3 steps
+        client = _mock_client_with_responses([resp] * 3)
 
         registry = create_default_registry()
         loop = ReactLoop(client=client, tools=registry, max_steps=3)
@@ -164,9 +180,7 @@ class TestReactLoop:
     @pytest.mark.asyncio
     async def test_unknown_tool_recovery(self):
         """LLM calls unknown tool, gets error, then finishes."""
-        client = AsyncMock()
-        client.timeout = 60.0
-        responses = iter([
+        responses = [
             json.dumps({
                 "thought": "Let me try this tool",
                 "action": "nonexistent_tool",
@@ -177,8 +191,8 @@ class TestReactLoop:
                 "action": "finish",
                 "action_input": "I cannot use that tool",
             }),
-        ])
-        client.chat = AsyncMock(side_effect=lambda **kwargs: next(responses))
+        ]
+        client = _mock_client_with_responses(responses)
 
         registry = create_default_registry()
         loop = ReactLoop(client=client, tools=registry, max_steps=5)
@@ -191,17 +205,15 @@ class TestReactLoop:
     @pytest.mark.asyncio
     async def test_json_parse_retry(self):
         """LLM returns invalid JSON, then valid JSON on retry."""
-        client = AsyncMock()
-        client.timeout = 60.0
-        responses = iter([
+        responses = [
             "This is not JSON at all",  # Bad response
             json.dumps({  # Retry response
                 "thought": "OK",
                 "action": "finish",
                 "action_input": "done",
             }),
-        ])
-        client.chat = AsyncMock(side_effect=lambda **kwargs: next(responses))
+        ]
+        client = _mock_client_with_responses(responses)
 
         registry = create_default_registry()
         loop = ReactLoop(client=client, tools=registry, max_steps=5, max_retries=2)
@@ -214,9 +226,8 @@ class TestReactLoop:
     @pytest.mark.asyncio
     async def test_json_in_markdown_block(self):
         """LLM wraps JSON in markdown code block."""
-        client = AsyncMock()
-        client.timeout = 60.0
-        client.chat = AsyncMock(return_value='```json\n{"thought": "thinking", "action": "finish", "action_input": "answer"}\n```')
+        resp = '```json\n{"thought": "thinking", "action": "finish", "action_input": "answer"}\n```'
+        client = _mock_client_with_responses([resp])
 
         registry = create_default_registry()
         loop = ReactLoop(client=client, tools=registry, max_steps=5)
@@ -229,13 +240,12 @@ class TestReactLoop:
     @pytest.mark.asyncio
     async def test_with_context(self):
         """Task with additional context."""
-        client = AsyncMock()
-        client.timeout = 60.0
-        client.chat = AsyncMock(return_value=json.dumps({
+        resp = json.dumps({
             "thought": "I see the context",
             "action": "finish",
             "action_input": "analyzed",
-        }))
+        })
+        client = _mock_client_with_responses([resp])
 
         registry = create_default_registry()
         loop = ReactLoop(client=client, tools=registry, max_steps=5)
@@ -248,7 +258,7 @@ class TestReactLoop:
 
         assert result.finished is True
         # Verify context was included in the messages
-        call_args = client.chat.call_args
+        call_args = client.chat_with_usage.call_args
         messages = call_args.kwargs.get("messages", [])
         user_msg = [m for m in messages if m["role"] == "user"][0]
         assert "some code here" in user_msg["content"]
