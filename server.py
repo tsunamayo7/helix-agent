@@ -6,6 +6,7 @@ from fastmcp import Context, FastMCP
 
 from src.agent import AgentConfig, HelixAgent
 from src.agent_loader import AgentLoader
+from src.token_saver import RetryGuard, TokenSaver
 
 mcp = FastMCP(
     "helix-agents",
@@ -17,6 +18,9 @@ mcp = FastMCP(
         "Use 'see' for image analysis. "
         "Use 'computer_use' for desktop/browser interaction (screenshot, click, type, scroll, navigate, read_page). "
         "Use 'browse' to open a URL and extract page text. "
+        "Use 'vision_compress' to turn a screenshot into a compact structured summary (~500 tokens vs 15K raw) before Claude sees it. "
+        "Use 'dom_compress' to turn an HTML page into a compact structured summary (~500 tokens vs 100K+ raw). "
+        "Use 'retry_guard' to detect when Claude Code is stuck in a retry loop calling the same tool with identical args. "
         "Use 'providers' and 'models' to inspect routing and switch providers. "
         "Use 'agent_types' to list available agent definitions. "
         "Use spawn/send/wait/list/close agent tools for persistent Claude Code-style workers."
@@ -27,6 +31,8 @@ runtime = HelixAgent(AgentConfig())
 agent_loader = AgentLoader()
 agent_loader.load_user_agents()
 agent_loader.load_project_agents()
+token_saver = TokenSaver()
+retry_guard = RetryGuard()
 
 
 @mcp.tool()
@@ -284,6 +290,110 @@ async def browse(url: str, task: str = "") -> dict:
     handler = ComputerUseHandler()
     result = await handler.browse(url, task=task)
     return result
+
+
+@mcp.tool()
+async def vision_compress(
+    image_path: str = "",
+    image_base64: str = "",
+    custom_prompt: str = "",
+    model: str = "",
+) -> dict:
+    """Compress a screenshot into a compact structured summary using a local vision model.
+
+    A raw screenshot passed to Claude Code typically costs 5,000-15,000 tokens. This
+    tool uses gemma4:31b locally to extract a ~400-token JSON summary (page type,
+    interactive elements, key text, state flags) so Claude Code only sees the signal.
+
+    Args:
+        image_path: Local path to a PNG/JPEG screenshot (alternative to image_base64).
+        image_base64: Base64-encoded image data (alternative to image_path).
+        custom_prompt: Override the default extraction prompt.
+        model: Override the default vision model (gemma4:31b).
+
+    Returns:
+        Dict with `summary` (structured JSON), `raw_response`, `tokens_saved_estimate`.
+    """
+    return await token_saver.vision_compress(
+        image_path=image_path,
+        image_base64=image_base64,
+        custom_prompt=custom_prompt,
+        model=model,
+    )
+
+
+@mcp.tool()
+async def dom_compress(
+    html: str = "",
+    url: str = "",
+    text_content: str = "",
+    custom_prompt: str = "",
+    model: str = "",
+) -> dict:
+    """Compress a DOM/HTML payload into a compact structured summary.
+
+    Playwright MCP often sends the full DOM to Claude Code (114K+ tokens per call
+    in TestCollab's benchmark vs 27K for CLI equivalents). This tool uses a local
+    model to extract only the forms, links, buttons, and main content an agent
+    needs to take the next action.
+
+    Args:
+        html: Raw HTML string (alternative to text_content).
+        url: Page URL for context.
+        text_content: Pre-extracted page text (alternative to html).
+        custom_prompt: Override the default extraction prompt.
+        model: Override the default text model.
+
+    Returns:
+        Dict with `summary` (structured JSON), `original_char_count`, `tokens_saved_estimate`.
+    """
+    return await token_saver.dom_compress(
+        html=html,
+        url=url,
+        text_content=text_content,
+        custom_prompt=custom_prompt,
+        model=model,
+    )
+
+
+@mcp.tool()
+async def retry_guard_check(
+    tool_name: str,
+    args: dict | None = None,
+    session_id: str = "default",
+) -> dict:
+    """Detect when the orchestrator is stuck calling the same tool with identical args.
+
+    Addresses a documented Claude Code pain point (anthropics/claude-code#41659):
+    the agent sometimes ignores user corrections and repeats the same failing
+    tool call, burning tokens until the Max plan quota is exhausted. This guard
+    tracks tool calls per session and warns when a repeat-loop forms.
+
+    Args:
+        tool_name: Name of the tool being called.
+        args: Arguments passed to the tool.
+        session_id: Session identifier for isolating histories.
+
+    Returns:
+        Dict with `loop_detected`, `repeat_count`, `recommendation`.
+    """
+    return retry_guard.check(
+        tool_name=tool_name,
+        args=args or {},
+        session_id=session_id,
+    )
+
+
+@mcp.tool()
+async def retry_guard_reset(session_id: str = "default") -> dict:
+    """Clear the retry-guard history for a session (call after resolving a loop)."""
+    return retry_guard.reset(session_id=session_id)
+
+
+@mcp.tool()
+async def retry_guard_status(session_id: str = "default") -> dict:
+    """Get retry-guard session stats: total_calls, unique_calls, max_repeats."""
+    return retry_guard.status(session_id=session_id)
 
 
 @mcp.tool()

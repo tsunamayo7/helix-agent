@@ -297,8 +297,47 @@ C:\Development\tools\helix-agent\
 - OTelマルチセッション分析: https://zenn.dev/seeda_yuto/articles/otel-multi-session-analysis
 - OTelツール: https://github.com/mii012345/otel-agent-trace
 
-### v1.0.0 — 正式公開
-- [ ] mcpservers.org 登録
-- [ ] 記事投稿（Reddit, Zenn, Dev.to, HN）
-- [ ] helix-pilot連携デモ
+### v0.10.0 — Token Drain Crisis Response ✅ 完了（2026-04-05）
+
+2026-03-31 の Anthropic 公式謝罪「users hitting usage limits way faster than expected」を受けて、
+ユーザー調査で特定された Computer Use の痛点を直撃する機能を追加。
+
+- [x] `vision_compress` — スクショ→構造化JSON要約（15K→400 tokens、~94%削減）
+- [x] `dom_compress` — HTML→構造化JSON要約（114K→500 tokens、~99%削減）
+- [x] `retry_guard_check` / `_status` / `_reset` — 同一ツール呼び出し反復ループ検知
+- [x] README を Token Drain Crisis 文脈で再ポジショニング
+- [x] テスト 28個追加（token_saver.py 全機能カバー）
+
+### v1.0.0 — 正式公開（Token Drain Crisis 特化ローンチ）
+
+**ポジショニング**: "Stop the Token Drain. Survive Claude Code's Computer Use costs."
+
+#### 技術ロードマップ
+- [ ] ベンチマーク記事（英日）: Before/After 数値で証明
+- [ ] デモGIF作成: "Gmail 50件処理 token 比較"
+- [ ] PathGuard 強化（CVE-2025-59536 文脈で差別化）
+- [ ] Prompt Injection Scanner（取得コンテンツの事前サニタイズ）
+- [ ] Token Budget Dashboard（tracing.py 拡張、実時間節約額表示）
+- [ ] `git_ops` tool（PR自動作成エージェント）
 - [ ] CI/CD（GitHub Actions）
+
+#### ローンチ戦略
+- [ ] Reddit r/ClaudeAI の Token drain crisis スレッドに reply
+- [ ] Reddit r/LocalLLaMA へ投稿
+- [ ] HN "Show HN: Cut Claude Code Computer Use costs by 94% with local vision models"
+- [ ] Zenn/Qiita（日本語）「Claude Code トークン節約術」
+- [ ] awesome-claude-code に PR 登録
+- [ ] mcpservers.org 登録
+
+#### マーケティング訴求
+- "Stop the Token Drain" をキャッチコピー主軸に
+- Anthropic 公式謝罪を引用して文脈共有
+- 15,000 tokens per screenshot を定量説明
+- BYOM できない Claude Code に外付け BYOM を
+
+### v1.1.0 — ComputerUse特化モデル学習（将来）
+
+- [ ] v4学習データセット構築（Computer Use 特化ペア 1,000件）
+- [ ] git操作対話ペア 500件
+- [ ] ReAct思考トレース 500件
+- [ ] gemma4-agent-coder-v4 リリース

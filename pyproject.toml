@@ -1,7 +1,7 @@
 [project]
 name = "helix-agent"
-version = "0.9.0"
-description = "Claude Code extension MCP server for multi-provider agents including Ollama, Codex, OpenAI-compatible APIs, and Computer Use"
+version = "0.10.0"
+description = "Survive Claude Code's Token Drain Crisis — offload screenshots, DOM, and retry loops to local LLMs via MCP"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
