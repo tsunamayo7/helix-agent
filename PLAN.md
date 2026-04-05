@@ -335,9 +335,33 @@ C:\Development\tools\helix-agent\
 - 15,000 tokens per screenshot を定量説明
 - BYOM できない Claude Code に外付け BYOM を
 
-### v1.1.0 — ComputerUse特化モデル学習（将来）
+### v1.1.0 — 既存UIモデル統合（戦略転換、2026-04-05）
 
-- [ ] v4学習データセット構築（Computer Use 特化ペア 1,000件）
-- [ ] git操作対話ペア 500件
-- [ ] ReAct思考トレース 500件
-- [ ] gemma4-agent-coder-v4 リリース
+**調査結果**: UI理解タスクには既に優秀なオープンモデルが存在。
+gemma4 v4自作より既存モデルの統合が10倍効率的と判断。
+
+#### 既存モデル候補
+| モデル | ライセンス | サイズ | 用途 |
+|---|---|---|---|
+| **OmniParser v2** (Microsoft) | MIT | YOLOv8+Florence-2 | vision_compress バックエンド（最有力） |
+| **ShowUI-2B** (Show Lab) | Apache 2.0 | 2B | 軽量vision_compress、10倍高速 |
+| **UI-TARS-1.5-7B** (ByteDance) | Apache 2.0 | 7B | 統合エージェント用 |
+
+#### 公開データセット（独自収集不要）
+- RICO-Screen2Words（112k、CC-BY-4.0）
+- Multimodal-Mind2Web（2,350タスク）
+- WebLINX（10万インタラクション）
+- ScreenSpot-Pro（評価ベンチマーク）
+
+#### v1.1.0 タスク
+- [ ] OmniParser v2 をhelix-agentにバックエンド統合
+- [ ] ShowUI-2B をオプションバックエンド追加
+- [ ] 3者ベンチマーク（gemma4:31b vs OmniParser v2 vs ShowUI-2B）
+- [ ] retry_guard をWebLINX失敗トレースで評価（学術化）
+- [ ] ベンチマークレポート公開
+
+### v1.2.0 — Fine-tune判断（条件付き）
+
+Phase 1ベンチマーク結果次第:
+- 既存モデルが十分 → fine-tune中止
+- ギャップ発見時 → ShowUI-2B (2B) をLoRA微調整（31B全体学習よりはるかに軽量）
