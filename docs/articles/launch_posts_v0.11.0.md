@@ -4,7 +4,92 @@
 
 ---
 
-## 📝 投稿1: X 日本語 単発（X自動翻訳対応・両市場リーチ型）
+## 📝 投稿1-A: 【最終版】 X 日本語 単発（拡張データ反映）
+
+**設計根拠**: 実測TOP投稿（15万views超）の5大パターンを取り込み:
+1. 価値転換の明示（quota19分消費→防げる）
+2. 数値具体性（#41659, 5時間→19分, 94%, 308 tests）
+3. 時代宣言フレーズ抑制（翻訳互換維持のため）
+4. 自分語り要素（「自分も体験した」）
+
+```
+Claude Code の Max quota、5時間分が19分で消える現象
+(anthropics/claude-code#41659) を自分も体験しました。
+
+Opus が同じツールを同じ引数で延々と呼び続けるバグが原因です。
+公式にループ検知機能は未実装。
+
+MCP サーバーで解決しました:
+
+✅ retry_guard_check — 同一呼び出しを検知して警告（LLM不要、純ロジック）
+✅ vision_compress — スクリーンショット 15,000→400 トークン (94%削減)
+✅ dom_compress — HTML 114,000→500 トークン
+
+Windows の日本語入力問題 (React Ink + IME) 向けに
+helix-agent-ja-input (tkinter・依存ゼロ) も同梱。
+
+MIT / 308 tests passing
+https://github.com/tsunamayo7/helix-agent
+
+#ClaudeCode #MCP
+```
+
+**字数**: 約320字（X 280字上限超過→URL除外で収まる。要トリム）
+**翻訳互換性**: ✅ 数字・英数字コード・記号のみ
+
+---
+
+## 📝 投稿1-B: X 日本語（280字版、翻訳互換）
+
+```
+Claude Code の Max quota 5時間分が19分で消える現象
+(claude-code#41659) を自分も体験しました。
+
+原因: Opus が同じツールを同じ引数で呼び続けるバグ。
+公式にループ検知は未実装。
+
+helix-agent v0.11.0 の解決策:
+
+✅ retry_guard — 同一呼び出しを検知（純ロジック、LLM不要）
+✅ vision_compress — 15K→400 トークン (94%削減)
+✅ dom_compress — 114K→500 トークン
+
+Windows日本語入力問題も ja-input で同梱解決。
+MIT / 308 tests
+
+https://github.com/tsunamayo7/helix-agent
+
+#ClaudeCode #MCP
+```
+
+**字数**: 約250字 ✅
+**パターン**: 体験共感 + 数字3点 + 技術列挙 + おまけ要素
+
+---
+
+## 📝 投稿1-C: X 英語単発（Quoted-candidate 作戦）
+
+英語で投稿し、日本人がQT引用コメントしやすい構造にする。引用されやすさ優先。
+
+```
+I lost 5 hours of Claude Max plan quota in 19 minutes.
+
+Root cause: Opus called the same tool with identical args
+over and over (claude-code#41659). No built-in loop guard.
+
+I built one. It's an MCP server:
+
+✅ retry_guard — detect loops before quota drains (pure logic)
+✅ vision_compress — screenshot → 400 tokens (94% cut)
+✅ dom_compress — HTML → 500 tokens
+
+MIT / 308 tests passing
+https://github.com/tsunamayo7/helix-agent
+```
+
+---
+
+## 📝 投稿1（旧版、参考用）: X 日本語 単発（X自動翻訳対応・両市場リーチ型）
 
 **設計方針**: X自動翻訳により1投稿で日英両市場カバー。翻訳で壊れる和製ニュアンス（保存版/神/マジで）を排除。数字・英数字コード・普遍語彙のみ使用。
 
