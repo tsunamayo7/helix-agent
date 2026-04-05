@@ -4,31 +4,39 @@
 
 ---
 
-## 📝 投稿1: X 日本語 単発（保存版リスト型）
+## 📝 投稿1: X 日本語 単発（X自動翻訳対応・両市場リーチ型）
+
+**設計方針**: X自動翻訳により1投稿で日英両市場カバー。翻訳で壊れる和製ニュアンス（保存版/神/マジで）を排除。数字・英数字コード・普遍語彙のみ使用。
 
 ```
-【Claude Codeのリトライ地獄、MCPで止められます】
+Claude Code のリトライループ問題を MCP で解決しました。
 
-Opusが同じツールを延々と呼んで Max quota が19分で消える問題
-(anthropics/claude-code#41659)、公式にループ検知は未実装。
+Opus が同じツールを同じ引数で繰り返し呼ぶバグ
+(anthropics/claude-code#41659) で、Max quota が
+19分で消費される事例が報告されています。
 
-v0.11.0 でこう解決しました:
+v0.11.0 で追加したツール:
 
 ✅ retry_guard_check — 同一呼び出しを検知して警告
-✅ vision_compress — スクショ→400トークンJSONへ圧縮
-✅ dom_compress — HTML→500トークンへ圧縮
+✅ vision_compress — スクリーンショットを400トークンへ圧縮
+✅ dom_compress — HTMLを500トークンへ圧縮
 
-おまけ: Windowsの日本語入力問題(React Ink+IME)も
-helix-agent-ja-input で一緒に解決しました。
+Windows の日本語入力問題 (React Ink + IME) 向けに
+helix-agent-ja-input (tkinter製) も同梱。
 
-MIT・308テスト通過
+MIT / 308 tests passing
 https://github.com/tsunamayo7/helix-agent
 
 #ClaudeCode #MCP
 ```
 
-**字数**: 約280字（Xは280字制限適合）
-**狙い**: 日本人開発者、IMEで困っている層、Max plan枯渇経験者
+**字数**: 約260字
+**狙い**: 日本人開発者をメイン、自動翻訳経由で英語圏・その他言語圏にも到達
+**翻訳検証ポイント**: `retry_guard_check`/`vision_compress`/`dom_compress`等のコード名、数字(19分/400/500/308/19分)、英数字バージョン、絵文字✅ は翻訳後も保持される
+
+**旧版（和製ニュアンス型）との比較**:
+- Before: 「リトライ地獄」「こう解決しました」「おまけ」→ 翻訳で意味劣化
+- After: 「リトライループ問題」「追加したツール」「同梱」→ 翻訳互換語彙
 
 ---
 
@@ -195,17 +203,28 @@ Happy to answer questions on architecture or edge cases.
 
 ---
 
-## 📋 投稿順序と間隔
+## 📋 投稿順序と間隔（X自動翻訳対応・修正版）
 
-| Day | 時刻 | チャネル |
-|---|---|---|
-| Day 0 | JST 21:00 | X 日本語単発 |
-| Day 0 | JST 22:00 | Zenn記事公開 |
-| Day 0 | JST 23:00 | HN Show HN |
-| Day 1 | JST 09:00 | Qiita記事公開 |
-| Day 1 | JST 14:00 | X 英語スレッド（7-tweet） |
-| Day 1 | JST 23:00 | Reddit r/LocalLLaMA |
-| Day 3 | JST 任意 | X で反応まとめ・Star数報告 |
+| Day | 時刻 | チャネル | 備考 |
+|---|---|---|---|
+| Day 0 | JST 21:00 | **X 日本語（翻訳互換）単発** | **1本で日英両市場カバー** |
+| Day 0 | JST 22:00 | Zenn記事公開 | 検索流入長期 |
+| Day 0 | JST 23:00 | HN Show HN | US朝一狙い |
+| Day 1 | JST 09:00 | Qiita記事公開 | Zenn流用 |
+| Day 1 | JST 14:00 | X英語スレッド（7-tweet） | 英語圏深掘り追加層 |
+| Day 1 | JST 23:00 | Reddit r/LocalLLaMA | ローカルLLM層 |
+| Day 3 | JST 任意 | X 自虐フォロー投稿 | mizchiパターン、コアユーザー深掘り |
+| Day 7 | JST 任意 | X 成果報告（Star数） | 数字共有で追加エンゲージメント |
+
+**Day 3 自虐フォロー投稿案（翻訳互換）**:
+```
+retry_guard_check を実装しながら「自分のループも止められないのに、
+Claude のループを検知するツールを作っているのか」と思いました。
+
+でも実際、自分より Claude の方が短時間でループします。
+人間の勝ち。
+```
+→ 自虐ユーモア＋内輪感、翻訳後も含意が伝わる（ループ=loop が共通）
 
 ---
 
