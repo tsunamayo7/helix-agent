@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
-  <title id="title">helix-agents architecture</title>
-  <desc id="desc">Claude Code routes through helix-agents to Ollama, Codex CLI, and OpenAI-compatible APIs.</desc>
+  <title id="title">helix-agent architecture</title>
+  <desc id="desc">Claude Code routes through helix-agent to Ollama, Codex CLI, and OpenAI-compatible APIs.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#0f172a"/>
@@ -18,7 +18,7 @@
   <circle cx="1040" cy="90" r="140" fill="#1d4ed8" opacity="0.08"/>
   <circle cx="180" cy="560" r="180" fill="#7c3aed" opacity="0.08"/>
 
-  <text x="70" y="92" fill="#e5e7eb" font-family="Segoe UI, Arial, sans-serif" font-size="54" font-weight="700">helix-agents</text>
+  <text x="70" y="92" fill="#e5e7eb" font-family="Segoe UI, Arial, sans-serif" font-size="54" font-weight="700">helix-agent</text>
   <text x="70" y="128" fill="#94a3b8" font-family="Segoe UI, Arial, sans-serif" font-size="23">Multi-provider MCP runtime for Claude Code</text>
 
   <g filter="url(#shadow)">
@@ -31,7 +31,7 @@
     <rect x="70" y="356" rx="22" ry="22" width="360" height="140" fill="url(#panel)" stroke="#a78bfa" stroke-width="2"/>
     <rect x="94" y="382" rx="16" ry="16" width="46" height="46" fill="#a78bfa"/>
     <text x="117" y="412" text-anchor="middle" fill="#f5f3ff" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="700">M</text>
-    <text x="165" y="405" fill="#f8fafc" font-family="Segoe UI, Arial, sans-serif" font-size="33" font-weight="600">helix-agents</text>
+    <text x="165" y="405" fill="#f8fafc" font-family="Segoe UI, Arial, sans-serif" font-size="33" font-weight="600">helix-agent</text>
     <text x="165" y="440" fill="#9ca3af" font-family="Segoe UI, Arial, sans-serif" font-size="22">Unified MCP surface + background agents</text>
     <text x="165" y="470" fill="#60a5fa" font-family="Segoe UI, Arial, sans-serif" font-size="20">think / agent_task / providers / spawn / wait</text>
 

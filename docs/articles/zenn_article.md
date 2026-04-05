@@ -1,5 +1,5 @@
 ---
-title: "helix-agent を helix-agents に進化させた: Ollama / Codex / OpenAI-compatible を 1 つの MCP で切り替える"
+title: "helix-agent を helix-agent に進化させた: Ollama / Codex / OpenAI-compatible を 1 つの MCP で切り替える"
 emoji: "🤖"
 type: "tech"
 topics: ["mcp", "claudecode", "ollama", "codex", "python"]
@@ -8,7 +8,7 @@ published: true
 
 `helix-agent` はもともと、Claude Code からローカル Ollama モデルへタスクを委譲するための MCP サーバーでした。
 
-今回それを **helix-agents** として進化させ、1 つの MCP サーバーから次を切り替えられるようにしました。
+今回それを **helix-agent** として進化させ、1 つの MCP サーバーから次を切り替えられるようにしました。
 
 - `ollama`
 - `codex`
@@ -100,7 +100,7 @@ Claude Code 側は次のように設定します。
 ```json
 {
   "mcpServers": {
-    "helix-agents": {
+    "helix-agent": {
       "command": "uv",
       "args": ["run", "--directory", "/path/to/helix-agent", "python", "server.py"]
     }

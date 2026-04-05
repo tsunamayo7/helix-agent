@@ -1,4 +1,4 @@
-"""helix-agents MCP server: delegate tasks across multiple LLM providers."""
+"""helix-agent MCP server: delegate tasks across multiple LLM providers."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from src.agent_loader import AgentLoader
 from src.token_saver import RetryGuard, TokenSaver
 
 mcp = FastMCP(
-    "helix-agents",
+    "helix-agent",
     instructions=(
-        "helix-agents delegates tasks to multiple LLM providers. "
+        "helix-agent delegates tasks to multiple LLM providers. "
         "Use 'think' for single-step reasoning, analysis, or code generation. "
         "Use 'agent_task' for multi-step tasks requiring iterative reasoning with tool use. "
         "Use 'fork_task' to fork a sub-task with parent context inheritance (Claude Code forkSubagent pattern). "
@@ -146,7 +146,7 @@ async def models(action: str = "list", model_name: str = "", provider: str = "au
 
 @mcp.tool()
 async def config(action: str = "show", key: str = "", value: str = "") -> dict:
-    """View or update helix-agents configuration."""
+    """View or update helix-agent configuration."""
     return await runtime.config_action(action=action, key=key, value=value)
 
 

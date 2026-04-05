@@ -1,8 +1,8 @@
-# helix-agents
+# helix-agent
 
 **Stop the Token Drain.** Survive Claude Code's Computer Use token costs by offloading screenshots, DOM, and retry loops to local LLMs — keep Opus 4.6 for decisions that actually matter.
 
-`helix-agents` is an MCP server that turns local models (gemma4, qwen3.5, etc.) into Claude Code subagents with full tool access, vision, memory, and Computer Use.
+`helix-agent` is an MCP server that turns local models (gemma4, qwen3.5, etc.) into Claude Code subagents with full tool access, vision, memory, and Computer Use.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
@@ -30,7 +30,7 @@ A single "analyze this page" task can cost **250K-500K tokens** before Claude ev
 ```
 Claude Code (Opus 4.6 — decides WHAT to do)
   ↓ MCP call (~500 tokens in, ~500 tokens out)
-helix-agents (local, zero API cost)
+helix-agent (local, zero API cost)
   ├── vision_compress    screenshot → ~400-token JSON summary
   ├── dom_compress       full DOM → ~500-token structured extract
   ├── retry_guard        detect repeat-loops before they drain quota
@@ -68,7 +68,7 @@ Add to Claude Code (`~/.claude/settings.json`):
 ```json
 {
   "mcpServers": {
-    "helix-agents": {
+    "helix-agent": {
       "command": "uv",
       "args": ["run", "--directory", "/path/to/helix-agent", "python", "server.py"]
     }
@@ -80,7 +80,7 @@ That's it. Claude Code now has a local subagent runtime.
 
 ## Real Token Savings
 
-| Task | Without helix-agents | With helix-agents | Savings |
+| Task | Without helix-agent | With helix-agent | Savings |
 |------|---------------------:|------------------:|--------:|
 | Analyze one screenshot | 8K-15K tokens | ~400 tokens | **94-97%** |
 | Read one web page via MCP | ~114K tokens | ~500 tokens | **99%** |
@@ -120,7 +120,7 @@ That's it. Claude Code now has a local subagent runtime.
 
 Claude Code has documented prompt-injection vulnerabilities
 ([CVE-2025-59536](https://research.checkpoint.com/2026/rce-and-api-token-exfiltration-through-claude-code-project-files-cve-2025-59536/))
-where malicious content in project files can exfiltrate API tokens. helix-agents
+where malicious content in project files can exfiltrate API tokens. helix-agent
 provides **PathGuard** — path allowlists and sanitization — so delegated tools
 cannot access sensitive locations outside the workspace.
 
@@ -144,7 +144,7 @@ Claude Code (Opus 4.6)
   │
   ├─ Simple tasks → Opus handles directly
   │
-  └─ Computer Use / research / exploration → helix-agents MCP
+  └─ Computer Use / research / exploration → helix-agent MCP
        │
        ├─ vision_compress → gemma4 vision → structured summary
        ├─ dom_compress    → gemma4 text → structured extract
@@ -164,7 +164,7 @@ Claude Code (Opus 4.6)
 
 ## Not a Claude Code Wrapper
 
-helix-agents is an **MCP server that Claude Code connects to** — it does not
+helix-agent is an **MCP server that Claude Code connects to** — it does not
 wrap, proxy, or re-host Claude Code or the Anthropic API. This keeps it fully
 compliant with Anthropic's Terms of Service while letting you route
 screenshot-analysis, DOM-extraction, and retry-loop-prone workflows through

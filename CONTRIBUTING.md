@@ -1,4 +1,4 @@
-# Contributing to helix-agents
+# Contributing to helix-agent
 
 ## Setup
 

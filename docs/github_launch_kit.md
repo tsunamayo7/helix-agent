@@ -1,6 +1,6 @@
 # GitHub Launch Kit
 
-This file is a ready-to-use checklist for polishing the public GitHub surface of `helix-agents`.
+This file is a ready-to-use checklist for polishing the public GitHub surface of `helix-agent`.
 
 ## Recommended Repository Description
 
@@ -37,7 +37,7 @@ Use the main repository URL unless you later publish docs elsewhere.
 
 Upload:
 
-- `docs/assets/helix-agents-social-preview.svg`
+- `docs/assets/helix-agent-social-preview.svg`
 
 If GitHub rejects SVG for social preview in the web UI, export it to PNG first and upload the PNG instead.
 
@@ -55,8 +55,8 @@ The strongest public flow is:
 
 Short version:
 
-`helix-agents turns the original Ollama-focused helix-agent into a multi-provider MCP runtime for Claude Code, with Ollama, Codex, OpenAI-compatible APIs, and persistent background agents.`
+`helix-agent turns the original Ollama-focused helix-agent into a multi-provider MCP runtime for Claude Code, with Ollama, Codex, OpenAI-compatible APIs, and persistent background agents.`
 
 Longer version:
 
-`helix-agents is a multi-provider MCP server for Claude Code. It keeps the local Ollama workflow, adds Codex and OpenAI-compatible providers, and exposes a Claude Code-style background agent lifecycle so delegation feels consistent across providers.`
+`helix-agent is a multi-provider MCP server for Claude Code. It keeps the local Ollama workflow, adds Codex and OpenAI-compatible providers, and exposes a Claude Code-style background agent lifecycle so delegation feels consistent across providers.`

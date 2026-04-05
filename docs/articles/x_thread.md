@@ -1,7 +1,7 @@
 # X (Twitter) Thread
 
 ## Tweet 1
-I turned `helix-agent` into **helix-agents**.
+I turned `helix-agent` into **helix-agent**.
 
 It started as a Claude Code MCP for local Ollama models.
 Now it can route work across:

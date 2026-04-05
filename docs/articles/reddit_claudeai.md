@@ -5,7 +5,7 @@ I turned my Ollama MCP into a multi-provider Claude Code agent runtime
 
 **Body:**
 
-I’ve been evolving `helix-agent` into **helix-agents**.
+I’ve been evolving `helix-agent` into **helix-agent**.
 
 The original version was focused on local Ollama models.
 The new version can delegate through one MCP server to:

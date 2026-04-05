@@ -45,7 +45,7 @@ actually uses. The rest is boilerplate, ads, nav menus, analytics.
 
 ## What I built
 
-`helix-agents` is an MCP server that Claude Code connects to. It exposes three
+`helix-agent` is an MCP server that Claude Code connects to. It exposes three
 new tools (v0.10.0):
 
 ### `vision_compress`
@@ -93,7 +93,7 @@ retry_guard_check(tool_name="navigate", args={"url": "..."})
 
 ## Measured savings
 
-| Task | Vanilla Claude Code | With helix-agents | Savings |
+| Task | Vanilla Claude Code | With helix-agent | Savings |
 |------|--------------------:|------------------:|--------:|
 | Analyze one screenshot | 8K-15K tokens | ~900 tokens | **89-94%** |
 | Read one web page | ~114K tokens | ~1K tokens | **99%** |
@@ -108,7 +108,7 @@ Opus still makes every decision. It just isn't asked to look at pixels.
 Claude Code (Opus 4.6 — decides WHAT)
   │ MCP (cheap)
   ▼
-helix-agents
+helix-agent
   ├─ vision_compress → gemma4:31b vision → JSON
   ├─ dom_compress    → gemma4:31b text → JSON
   └─ retry_guard     → tracks call hashes → loop warnings
@@ -118,7 +118,7 @@ Stack: Python 3.12, FastMCP 2.0, httpx, Ollama, gemma4:31b. MIT licensed.
 
 ## Is this a Claude Code wrapper?
 
-**No.** helix-agents is an MCP server that Claude Code connects to. It doesn't
+**No.** helix-agent is an MCP server that Claude Code connects to. It doesn't
 proxy the Anthropic API or repackage Claude. It's the same pattern as any
 filesystem or database MCP — fully compliant with Anthropic's TOS.
 
@@ -144,7 +144,7 @@ Add to `~/.claude/settings.json`:
 ```json
 {
   "mcpServers": {
-    "helix-agents": {
+    "helix-agent": {
       "command": "uv",
       "args": ["run", "--directory", "/path/to/helix-agent", "python", "server.py"]
     }

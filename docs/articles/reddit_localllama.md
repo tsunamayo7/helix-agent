@@ -7,7 +7,7 @@ I upgraded my Claude Code + Ollama MCP into a multi-provider agent runtime
 
 I originally built `helix-agent` as an MCP server for Claude Code + local Ollama models.
 
-I’ve now pushed it further into **helix-agents**:
+I’ve now pushed it further into **helix-agent**:
 
 - keeps the Ollama path
 - adds `codex`

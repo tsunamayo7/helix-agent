@@ -1,7 +1,7 @@
 ---
-title: "I Turned helix-agent into helix-agents: One MCP Server for Ollama, Codex, and OpenAI-Compatible Models"
+title: "I Turned helix-agent into helix-agent: One MCP Server for Ollama, Codex, and OpenAI-Compatible Models"
 published: true
-description: "helix-agents upgrades the original Ollama-focused MCP server into a multi-provider runtime with Codex support and Claude Code-style background agents."
+description: "helix-agent upgrades the original Ollama-focused MCP server into a multi-provider runtime with Codex support and Claude Code-style background agents."
 tags: mcp, claudecode, ollama, codex, python
 cover_image:
 ---
@@ -14,7 +14,7 @@ If you use Claude Code heavily, you eventually hit the same wall:
 
 But most MCP servers still force one provider and one execution style.
 
-So I evolved `helix-agent` into **helix-agents**.
+So I evolved `helix-agent` into **helix-agent**.
 
 It now lets Claude Code delegate work across:
 
@@ -133,7 +133,7 @@ Add to Claude Code:
 ```json
 {
   "mcpServers": {
-    "helix-agents": {
+    "helix-agent": {
       "command": "uv",
       "args": ["run", "--directory", "/path/to/helix-agent", "python", "server.py"]
     }
