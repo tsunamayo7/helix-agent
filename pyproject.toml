@@ -1,12 +1,12 @@
 [project]
 name = "helix-agent"
-version = "0.10.0"
-description = "Survive Claude Code's Token Drain Crisis — offload screenshots, DOM, and retry loops to local LLMs via MCP"
+version = "0.11.0"
+description = "The missing retry loop guard for Claude Code — plus vision/DOM compression and Japanese input helpers via MCP"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "tsunamayo7" }]
-keywords = ["mcp", "agent", "llm", "ollama", "codex", "openai-compatible", "claude-code"]
+keywords = ["mcp", "agent", "llm", "ollama", "claude-code", "retry-guard", "japanese"]
 dependencies = [
     "fastmcp>=2.0",
     "httpx>=0.27",
@@ -15,11 +15,15 @@ dependencies = [
 [project.optional-dependencies]
 memory = ["qdrant-client>=1.12"]
 browser = ["playwright>=1.40"]
+ja = ["paddleocr>=2.7"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-timeout>=2.3",
 ]
+
+[project.scripts]
+helix-agent-ja-input = "src.ja_input:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
