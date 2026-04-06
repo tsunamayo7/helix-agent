@@ -125,7 +125,10 @@ class ComputerUseHandler:
         prefer_agent_browser: bool = True,
     ):
         self.helix_pilot_url = helix_pilot_url
-        self.vision = vision_analyzer or VisionAnalyzer()
+        if vision_analyzer is None:
+            from .gpu_detect import auto_select_model
+            vision_analyzer = VisionAnalyzer(model=auto_select_model("vision"))
+        self.vision = vision_analyzer
         self._pw_session: PlaywrightSession | None = None
         self._ab_session: AgentBrowserSession | None = None
         self._use_pilot: bool | None = None
@@ -202,6 +205,12 @@ class ComputerUseHandler:
         if action == "screenshot" and analyze and "image_base64" in result:
             vision_result = await self.vision.analyze(result["image_base64"], prompt=prompt)
             result["analysis"] = vision_result
+            # Token-saving: return text summary instead of raw base64
+            # Claude receives ~400 tokens instead of ~15,000
+            if "image_base64" in result and vision_result:
+                result["_raw_image_available"] = True
+                result["_token_saving"] = "Image compressed to text summary via local LLM. Use vision_compress for raw image."
+                del result["image_base64"]  # Don't send 15K tokens to Claude
 
         return result
 

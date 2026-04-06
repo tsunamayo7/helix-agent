@@ -1,0 +1,66 @@
+[
+  {
+    "model": "gemma4:e2b",
+    "task": "dom_compress",
+    "latency_ms": 10187,
+    "output_length": 1443,
+    "output_quality": "text",
+    "output_preview": "```json\n{\n  \"page_title\": \"Test Page\",\n  \"navigation_links\": [\n    {\n      \"text\": \"Home\",\n      \"url\": \"/\"\n    },\n    {\n      \"text\": \"About\",\n      \"url\": \"/about\"\n    },\n    {\n      \"text\": \"Contac"
+  },
+  {
+    "model": "gemma4:e4b",
+    "task": "dom_compress",
+    "latency_ms": 11796,
+    "output_length": 1016,
+    "output_quality": "text",
+    "output_preview": "```json\n{\n  \"page_title\": \"Test Page\",\n  \"navigation_links\": [\n    {\"text\": \"Home\", \"href\": \"/\"},\n    {\"text\": \"About\", \"href\": \"/about\"},\n    {\"text\": \"Contact\", \"href\": \"/contact\"}\n  ],\n  \"form_fiel"
+  },
+  {
+    "model": "gemma4:26b",
+    "task": "dom_compress",
+    "latency_ms": 14655,
+    "output_length": 671,
+    "output_quality": "text",
+    "output_preview": "```json\n{\n  \"page_title\": \"Test Page\",\n  \"navigation_links\": [\n    { \"text\": \"Home\", \"url\": \"/\" },\n    { \"text\": \"About\", \"url\": \"/about\" },\n    { \"text\": \"Contact\", \"url\": \"/contact\" }\n  ],\n  \"form_f"
+  },
+  {
+    "model": "gemma4:31b",
+    "task": "dom_compress",
+    "latency_ms": 27500,
+    "output_length": 689,
+    "output_quality": "text",
+    "output_preview": "```json\n{\n  \"page_title\": \"Test Page\",\n  \"navigation_links\": [\n    { \"text\": \"Home\", \"url\": \"/\" },\n    { \"text\": \"About\", \"url\": \"/about\" },\n    { \"text\": \"Contact\", \"url\": \"/contact\" }\n  ],\n  \"form_f"
+  },
+  {
+    "model": "gemma4:e2b",
+    "task": "evolving_memory",
+    "latency_ms": 9375,
+    "output_length": 177,
+    "output_quality": "text",
+    "output_preview": "```json\n{\n  \"should_save\": true,\n  \"content\": \"agent-browserに切り替えました。Playwrightと比較して82-93%のトークン削減が確認できました。設定はhelix-agentのcomputer_useツール経由で自動ルーティングされます。\",\n  \"type\": \"fact\"\n}\n```"
+  },
+  {
+    "model": "gemma4:e4b",
+    "task": "evolving_memory",
+    "latency_ms": 12328,
+    "output_length": 244,
+    "output_quality": "text",
+    "output_preview": "```json\n{\n  \"should_save\": true,\n  \"content\": \"Claude Codeのブラウザ操作において、高すぎるトークン消費（Playwright MCPで15K消費）が問題であったため、agent-browserへ切り替えを実施。これにより、Playwrightと比較して82-93%のトークン削減を確認した。設定はhelix-agentのcomputer_us"
+  },
+  {
+    "model": "gemma4:26b",
+    "task": "evolving_memory",
+    "latency_ms": 14358,
+    "output_length": 178,
+    "output_quality": "text",
+    "output_preview": "```json\n{\"should_save\": true, \"content\": \"Claude Codeでブラウザ操作を行う際、トークン消費を抑えるためにPlaywright MCPではなくagent-browserを使用する（agent-browserを使用することで大幅なトークン削減が可能）。\", \"type\": \"preference\"}\n```"
+  },
+  {
+    "model": "gemma4:31b",
+    "task": "evolving_memory",
+    "latency_ms": 18672,
+    "output_length": 189,
+    "output_quality": "text",
+    "output_preview": "```json\n{\"should_save\": true, \"content\": \"User prefers using agent-browser over Playwright MCP for browser operations in Claude Code to reduce token consumption.\", \"type\": \"preference\"}\n```"
+  }
+]

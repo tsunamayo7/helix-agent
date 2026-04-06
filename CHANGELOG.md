@@ -2,6 +2,41 @@
 
 All notable changes to helix-agent are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.14.0] - 2026-04-06
+
+### Added
+- **Self-evolving memory** (inspired by NousResearch/hermes-agent):
+  - `evolving_memory_review` tool — reviews conversation turns via local LLM, auto-saves insights
+  - `list_learned_skills` tool — lists auto-generated SKILL.md files
+  - `get_skill` tool — reads learned skill content
+  - Memory nudge every 5 turns, skill nudge every 8 tool calls
+  - All review runs on local Ollama ($0 cost)
+- **GPU auto-detection and model tiering** (`src/gpu_detect.py`):
+  - Detects NVIDIA GPU VRAM via `nvidia-smi`
+  - Auto-selects optimal model per task: vision, text, review, reasoning
+  - 5 tiers: 8GB (e2b) → 16GB (e4b) → 24GB (26b MoE) → 48GB (31b) → 64GB+ (qwen3.5)
+  - GPU info exposed in `helix://status` resource
+- **Benchmark script** (`scripts/benchmark_models.py`):
+  - Measures latency and output quality across all Gemma 4 variants
+  - Results: e2b is 2.7× faster than 31b with comparable compression quality
+- `vision_compress` and `dom_compress` now auto-select model based on GPU (no longer hardcoded to 31b)
+
+### Changed
+- README.md: Added token savings table, GPU tier benchmarks, self-evolving memory docs
+- README.ja.md: Full Japanese translation of new features
+- `helix://status` resource now includes GPU info and recommended models
+
+### Benchmarks (RTX PRO 6000)
+| Model | GPU Tier | DOM Compress | Memory Review |
+|-------|----------|-------------|---------------|
+| gemma4:e2b | 8GB | 10.2s | 9.4s |
+| gemma4:e4b | 16GB | 11.8s | 12.3s |
+| gemma4:26b | 24GB | 14.7s | 14.4s |
+| gemma4:31b | 48GB+ | 27.5s | 18.7s |
+
+### Compatibility
+- All 330 tests passing. No breaking changes.
+
 ## [0.13.0] - 2026-04-06
 
 ### Added

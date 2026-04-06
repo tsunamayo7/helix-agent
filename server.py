@@ -407,18 +407,21 @@ async def resource_status() -> str:
     from src.computer_use import ComputerUseHandler
 
     handler = ComputerUseHandler()
-    backend = handler._resolve_backend()
+    backend = await handler._resolve_backend()
 
     guard_stats = retry_guard.status(session_id="default")
     provider_info = await runtime.providers(action="list")
 
+    from src.gpu_detect import gpu_summary
+
     return __import__("json").dumps(
         {
-            "version": "0.13.0",
+            "version": "0.14.0",
             "browser_backend": backend,
             "retry_guard": guard_stats,
             "providers": provider_info,
             "agent_loader": agent_loader.to_dict(),
+            "gpu": gpu_summary(),
         },
         ensure_ascii=False,
     )
@@ -496,6 +499,54 @@ async def agent_types(action: str = "list", agent_type: str = "") -> dict:
             return {"error": f"Unknown agent type: {agent_type}", "available": agent_loader.list_names()}
         return defn.to_dict()
     return agent_loader.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Evolving Memory — self-improving agent (hermes-agent inspired)
+# ---------------------------------------------------------------------------
+
+from src.evolving_memory import EvolvingMemory
+
+evolving_memory = EvolvingMemory()
+
+
+@mcp.tool()
+async def evolving_memory_review(
+    user_message: str,
+    assistant_response: str,
+    tool_calls: str = "[]",
+) -> dict:
+    """Review a conversation turn and auto-save memories/skills if valuable.
+
+    Call this after completing a task. The review runs on a local LLM (gemma4)
+    at $0 cost. Memories are saved to Qdrant, skills to ~/.helix-agent/skills/.
+
+    Args:
+        user_message: The user's message from the completed turn.
+        assistant_response: The assistant's response.
+        tool_calls: JSON string of tool calls made during the turn.
+    """
+    import json as _json
+    calls = _json.loads(tool_calls) if tool_calls else []
+    return await evolving_memory.on_turn_end(user_message, assistant_response, calls)
+
+
+@mcp.tool()
+async def list_learned_skills() -> dict:
+    """List all auto-generated skills from the evolving memory system."""
+    return {
+        "skills": evolving_memory._skills.list_skills(),
+        "stats": evolving_memory.stats(),
+    }
+
+
+@mcp.tool()
+async def get_skill(name: str) -> dict:
+    """Read the content of a learned skill."""
+    content = evolving_memory._skills.get_skill(name)
+    if content is None:
+        return {"error": f"Skill '{name}' not found", "available": [s["name"] for s in evolving_memory._skills.list_skills()]}
+    return {"name": name, "content": content}
 
 
 if __name__ == "__main__":

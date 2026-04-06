@@ -78,15 +78,17 @@ class TokenSaver:
     def __init__(
         self,
         ollama_host: str = "http://localhost:11434",
-        vision_model: str = "gemma4:31b",
-        text_model: str = "gemma4:31b",
+        vision_model: str = "",
+        text_model: str = "",
         timeout: float = 120.0,
     ):
+        from .gpu_detect import auto_select_model
+
         self.ollama_host = ollama_host.rstrip("/")
-        self.vision_model = vision_model
-        self.text_model = text_model
+        self.vision_model = vision_model or auto_select_model("vision")
+        self.text_model = text_model or auto_select_model("text")
         self.timeout = timeout
-        self.vision = VisionAnalyzer(host=self.ollama_host, model=vision_model, timeout=timeout)
+        self.vision = VisionAnalyzer(host=self.ollama_host, model=self.vision_model, timeout=timeout)
 
     async def vision_compress(
         self,
