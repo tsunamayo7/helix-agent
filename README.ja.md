@@ -148,7 +148,27 @@ retry_guard_check(tool_name="navigate", args={"url": "..."})
 
 `fill` がネイティブキーボードイベントを発火するため、Wantedly / LinkedIn など React SPA のフォームを追加ハックなしで埋められるようになりました。
 
-### 4. 使うほど賢くなる自己進化記憶（v0.14.0 NEW）
+### 4. 自律的画面確認（v0.14.0 NEW）
+
+Claude Codeの `computer_use` は通常、スクリーンショットをそのまま返します（1枚 ~15,000トークン）。helix-agentはこれを自動的にインターセプトします：
+
+```
+操作: computer_use(action="click", target="#submit")
+  ↓
+確認: computer_use(action="screenshot", analyze=True)
+  ↓ （生画像は自動削除、ローカルgemma4が解析）
+結果: "フォーム送信完了、成功トーストが表示" (~400トークン)
+```
+
+**MCPサーバーの `instructions` フィールドがClaude Codeに自動的に指示:**
+1. 生スクリーンショットではなく常に `vision_compress` を使用
+2. 操作後は必ず `analyze=True` で画面確認
+3. ツール呼び出し前に `retry_guard_check` でループ検出
+4. ルーチンタスクは `think` でローカルLLMに委譲（$0）
+
+**MCPサーバーを接続するだけで、Claude Codeが自律的にトークンを節約します** — ユーザーの介入不要。
+
+### 5. 使うほど賢くなる自己進化記憶（v0.14.0 NEW）
 
 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) に着想を得た機能。会話を N ターンごとにローカル LLM がバックグラウンドでレビューし、**再利用可能なスキルとインサイトを自動保存** します — $0 で。
 

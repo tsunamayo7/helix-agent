@@ -11,19 +11,33 @@ from src.token_saver import RetryGuard, TokenSaver
 mcp = FastMCP(
     "helix-agent",
     instructions=(
-        "helix-agent delegates tasks to multiple LLM providers. "
-        "Use 'think' for single-step reasoning, analysis, or code generation. "
-        "Use 'agent_task' for multi-step tasks requiring iterative reasoning with tool use. "
-        "Use 'fork_task' to fork a sub-task with parent context inheritance (Claude Code forkSubagent pattern). "
-        "Use 'see' for image analysis. "
-        "Use 'computer_use' for desktop/browser interaction (screenshot, click, type, scroll, navigate, read_page). "
-        "Use 'browse' to open a URL and extract page text. "
-        "Use 'vision_compress' to turn a screenshot into a compact structured summary (~500 tokens vs 15K raw) before Claude sees it. "
-        "Use 'dom_compress' to turn an HTML page into a compact structured summary (~500 tokens vs 100K+ raw). "
-        "Use 'retry_guard' to detect when Claude Code is stuck in a retry loop calling the same tool with identical args. "
-        "Use 'providers' and 'models' to inspect routing and switch providers. "
-        "Use 'agent_types' to list available agent definitions. "
-        "Use spawn/send/wait/list/close agent tools for persistent Claude Code-style workers."
+        "helix-agent cuts Claude Code token usage by 82-97% using local LLMs. "
+        "PROACTIVE USAGE RULES — use these tools automatically without user prompting:\n"
+        "1. TOKEN SAVING (always active):\n"
+        "   - ALWAYS call 'vision_compress' before sending any screenshot to Claude. Raw screenshots cost ~15,000 tokens; vision_compress returns ~400 tokens of text. Never send raw image data.\n"
+        "   - ALWAYS call 'dom_compress' before sending HTML/DOM to Claude. Raw DOM costs ~114,000 tokens; dom_compress returns ~500 tokens.\n"
+        "   - When 'computer_use' takes a screenshot with analyze=True, the raw image is auto-deleted and only text summary is returned.\n"
+        "2. RETRY PREVENTION (always active):\n"
+        "   - Call 'retry_guard_check' before any tool call that has failed before or looks like a repeat. Stops infinite loops at 3rd identical call.\n"
+        "3. SCREEN VERIFICATION:\n"
+        "   - After any computer_use action (click, type, navigate), verify the result by calling computer_use(action='screenshot', analyze=True) — this returns text, not an image.\n"
+        "   - Use 'vision_compress' for any screenshot verification instead of sending raw images to Claude.\n"
+        "4. LOCAL DELEGATION:\n"
+        "   - Use 'think' for reasoning, analysis, code review, summaries — runs on local LLM at $0 cost.\n"
+        "   - Use 'agent_task' for multi-step tasks requiring iterative reasoning with tool use.\n"
+        "   - Use 'fork_task' to fork a sub-task with parent context inheritance.\n"
+        "5. BROWSER & VISION:\n"
+        "   - Use 'computer_use' for desktop/browser interaction (screenshot, click, type, scroll, navigate, read_page).\n"
+        "   - Use 'browse' to open a URL and extract page text.\n"
+        "   - Use 'see' for image analysis via local vision LLM.\n"
+        "6. MEMORY & LEARNING:\n"
+        "   - 'evolving_memory_review' auto-saves reusable skills and preferences every 5 turns.\n"
+        "   - 'list_learned_skills' and 'get_skill' retrieve saved skills.\n"
+        "   - 'search_memory' / 'add_memory' for Qdrant shared memory.\n"
+        "7. INFRASTRUCTURE:\n"
+        "   - Use 'providers', 'models', 'config', 'agent_types' to inspect routing.\n"
+        "   - Use spawn/send/wait/list/close agent tools for persistent workers.\n"
+        "   - GPU auto-detected at startup — optimal model selected for 8GB to 96GB+ VRAM."
     ),
 )
 
@@ -253,14 +267,21 @@ async def computer_use(
     analyze: bool = False,
     prompt: str = "Describe what you see in this image.",
 ) -> dict:
-    """Interact with desktop or browser via helix-pilot or Playwright.
+    """Interact with desktop or browser via agent-browser, helix-pilot, or Playwright.
+
+    TOKEN SAVING: When action='screenshot' and analyze=True, the raw image is
+    automatically deleted from the response and only a text summary is returned
+    (~400 tokens instead of ~15,000). Always use analyze=True for verification.
+
+    RECOMMENDED FLOW: After any action (click, type, navigate), call this again
+    with action='screenshot', analyze=True to verify the result without wasting tokens.
 
     Args:
         action: One of screenshot, click, type, scroll, read_page, navigate.
         target: CSS selector or element description (for click/type).
         value: Text to type or scroll direction (up/down).
         url: URL for navigate action.
-        analyze: If True, run Ollama Vision analysis on screenshot.
+        analyze: If True, run local vision LLM analysis on screenshot (97% token saving).
         prompt: Vision analysis prompt (used when analyze=True).
     """
     from src.computer_use import ComputerUseHandler
@@ -299,20 +320,25 @@ async def vision_compress(
     custom_prompt: str = "",
     model: str = "",
 ) -> dict:
-    """Compress a screenshot into a compact structured summary using a local vision model.
+    """Compress a screenshot into a compact text summary using a local vision model — 97% token saving.
 
-    A raw screenshot passed to Claude Code typically costs 5,000-15,000 tokens. This
-    tool uses gemma4:31b locally to extract a ~400-token JSON summary (page type,
-    interactive elements, key text, state flags) so Claude Code only sees the signal.
+    ALWAYS use this instead of sending raw screenshots to Claude. A raw screenshot costs
+    ~15,000 tokens; this returns ~400 tokens of structured text. The model is auto-selected
+    based on your GPU (8GB: gemma4:e2b, 16GB: e4b, 24GB: 26b, 48GB+: 31b).
+
+    Use cases:
+    - Screen verification after browser/GUI actions
+    - Checking UI state, error messages, dialog boxes
+    - Reading form content, page layout, visible text
 
     Args:
         image_path: Local path to a PNG/JPEG screenshot (alternative to image_base64).
         image_base64: Base64-encoded image data (alternative to image_path).
         custom_prompt: Override the default extraction prompt.
-        model: Override the default vision model (gemma4:31b).
+        model: Override the auto-selected vision model.
 
     Returns:
-        Dict with `summary` (structured JSON), `raw_response`, `tokens_saved_estimate`.
+        Dict with `summary` (structured text), `raw_response`, `tokens_saved_estimate`.
     """
     return await token_saver.vision_compress(
         image_path=image_path,

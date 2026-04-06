@@ -157,6 +157,26 @@ Measured on 50 identical automation flows:
 | Playwright (screenshot+DOM) | ~15,000 | ⚠️ setValue silently reverts |
 | agent-browser (accessibility tree) | ~1,000–2,700 | ✅ native keyboard events work |
 
+### Autonomous screen verification (v0.14.0, NEW)
+
+Claude Code's `computer_use` normally sends raw screenshots (~15,000 tokens each) back to the model. helix-agent intercepts this:
+
+```
+Action: computer_use(action="click", target="#submit")
+  ↓
+Verify: computer_use(action="screenshot", analyze=True)
+  ↓ (raw image auto-deleted, local gemma4 analyzes)
+Result: "Form submitted, success toast visible" (~400 tokens)
+```
+
+**The `instructions` field in the MCP server tells Claude Code to:**
+1. Always use `vision_compress` instead of sending raw screenshots
+2. Always verify actions with `analyze=True` screenshots
+3. Always run `retry_guard_check` before repeating any tool call
+4. Delegate routine tasks to local LLM via `think` at $0 cost
+
+This means Claude Code **autonomously** saves tokens without any user intervention — just connect the MCP server and it works.
+
 ### Self-evolving memory (v0.14.0, NEW)
 
 Inspired by [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent): helix-agent reviews conversations every N turns using a local LLM and **automatically saves reusable skills and insights** — at $0 cost.

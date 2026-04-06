@@ -20,10 +20,14 @@ All notable changes to helix-agent are documented here. Format loosely follows [
   - Measures latency and output quality across all Gemma 4 variants
   - Results: e2b is 2.7× faster than 31b with comparable compression quality
 - `vision_compress` and `dom_compress` now auto-select model based on GPU (no longer hardcoded to 31b)
+- **Autonomous screen verification**: `computer_use(action="screenshot", analyze=True)` auto-deletes raw image, returns text summary only (97% token saving)
+- **Enhanced MCP instructions**: Server instructions now tell Claude Code to proactively use vision_compress, retry_guard, and local delegation — zero user config needed
 
 ### Changed
-- README.md: Added token savings table, GPU tier benchmarks, self-evolving memory docs
-- README.ja.md: Full Japanese translation of new features
+- README.md: Added autonomous screen verification section, token savings table, GPU tier benchmarks
+- README.ja.md: Full Japanese translation including autonomous verification docs
+- `computer_use` docstring enhanced with token-saving flow documentation
+- MCP server instructions expanded from 6 lines to comprehensive 7-section proactive usage guide
 - `helix://status` resource now includes GPU info and recommended models
 
 ### Benchmarks (RTX PRO 6000)
