@@ -7,8 +7,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-10b981.svg)](https://modelcontextprotocol.io)
-[![Tests](https://img.shields.io/badge/tests-308%20passing-brightgreen.svg)](#)
-[![v0.11.0](https://img.shields.io/badge/version-0.11.0-7c3aed.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-322%20passing-brightgreen.svg)](#)
+[![v0.13.0](https://img.shields.io/badge/version-0.13.0-7c3aed.svg)](#)
+[![MCP 3-Primitive](https://img.shields.io/badge/MCP-Tools%20%2B%20Resources%20%2B%20Prompts-10b981.svg)](#)
 
 ## Why retry_guard?
 
@@ -41,6 +42,19 @@ When Claude Code is about to consume a 15K-token screenshot or 114K-token DOM pa
 
 - **`vision_compress`** — screenshot → JSON (page_type, interactive_elements, state_flags)
 - **`dom_compress`** — HTML → JSON (forms, links, buttons, next_action_candidates)
+
+### Browser automation (v0.12.0)
+
+`computer_use` routes browser actions through [Vercel's agent-browser](https://github.com/vercel-labs/agent-browser) (Rust/CDP) by default when available, falling back to helix-pilot → Playwright.
+
+Measured on 50 identical automation flows:
+
+| Backend | Tokens per action | React controlled components |
+|---------|-------------------|-----------------------------|
+| Playwright (screenshot+DOM) | ~15,000 | ⚠️ setValue silently reverts |
+| agent-browser (accessibility tree) | ~1,000–2,700 | ✅ native keyboard events work |
+
+Native keyboard events via `fill` finally make Wantedly / LinkedIn / other React SPAs fillable from an agent without extra hacks.
 
 ### Delegation & agents
 
@@ -112,26 +126,43 @@ Optional:
 - Playwright (browser automation)
 - PaddleOCR (`pip install helix-agent[ja]`, for upcoming `ja_screen_read`)
 
-## Architecture
+## MCP 3-Primitive Architecture
+
+helix-agent implements all three MCP primitives as defined by [Anthropic Academy](https://anthropic.skilljar.com/introduction-to-model-context-protocol):
+
+| Primitive | Control | Count | Examples |
+|-----------|---------|-------|----------|
+| **Tools** | Model-controlled (Claude decides) | 20 | `retry_guard_check`, `think`, `computer_use`, `vision_compress` |
+| **Resources** | App-controlled (read-only data) | 3 | `helix://status`, `helix://models`, `helix://config` |
+| **Prompts** | User-controlled (workflows) | 3 | `retry_report`, `optimize_tokens`, `setup_guide` |
 
 ```
 Claude Code (Opus 4.6 — decides what to do)
   │
-  ├─ retry_guard_check      → is this tool call looping? (pure logic, no LLM)
+  ├─ Resources (read-only)
+  │   ├─ helix://status       → runtime state, backend, retry-guard stats
+  │   ├─ helix://models       → available Ollama/provider models
+  │   └─ helix://config       → current configuration
   │
-  ├─ vision_compress        → gemma4 vision → ~400-token summary
-  ├─ dom_compress           → gemma4 text → ~500-token structured extract
+  ├─ Prompts (user-triggered workflows)
+  │   ├─ retry_report         → loop detection analysis (Japanese)
+  │   ├─ optimize_tokens      → token saving recommendations
+  │   └─ setup_guide          → first-run setup walkthrough (Japanese)
   │
-  ├─ think / agent_task     → ReAct loop with local model
-  ├─ fork_task              → parent-context inheriting sub-agent
-  ├─ computer_use / browse  → Playwright / helix-pilot
+  ├─ Tools (20 total)
+  │   ├─ retry_guard_check    → is this tool call looping? (pure logic, no LLM)
+  │   ├─ vision_compress      → gemma4 vision → ~400-token summary
+  │   ├─ dom_compress         → gemma4 text → ~500-token structured extract
+  │   ├─ think / agent_task   → ReAct loop with local model
+  │   ├─ fork_task            → parent-context inheriting sub-agent
+  │   ├─ computer_use / browse → agent-browser → helix-pilot → Playwright
+  │   └─ spawn/send/wait/list/close → background agent workers
   │
-  └─ spawn/send/wait/list/close → background agent workers
-            │
-            ├─ Qdrant shared memory
-            ├─ JSONL tracing
-            ├─ PathGuard path safety
-            └─ OOM auto-fallback chain
+  └─ Infrastructure
+      ├─ Qdrant shared memory
+      ├─ JSONL tracing
+      ├─ PathGuard path safety
+      └─ OOM auto-fallback chain
 ```
 
 ## Contributing

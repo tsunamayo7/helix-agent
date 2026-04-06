@@ -396,6 +396,92 @@ async def retry_guard_status(session_id: str = "default") -> dict:
     return retry_guard.status(session_id=session_id)
 
 
+# ---------------------------------------------------------------------------
+# Resources (App-Controlled) — MCP 3-primitive compliance
+# ---------------------------------------------------------------------------
+
+
+@mcp.resource("helix://status")
+async def resource_status() -> str:
+    """Current helix-agent runtime status: backend, provider, retry-guard stats."""
+    from src.computer_use import ComputerUseHandler
+
+    handler = ComputerUseHandler()
+    backend = handler._resolve_backend()
+
+    guard_stats = retry_guard.status(session_id="default")
+    provider_info = await runtime.providers(action="list")
+
+    return __import__("json").dumps(
+        {
+            "version": "0.13.0",
+            "browser_backend": backend,
+            "retry_guard": guard_stats,
+            "providers": provider_info,
+            "agent_loader": agent_loader.to_dict(),
+        },
+        ensure_ascii=False,
+    )
+
+
+@mcp.resource("helix://models")
+async def resource_models() -> str:
+    """Available LLM models across all configured providers."""
+    result = await runtime.models(action="list")
+    return __import__("json").dumps(result, ensure_ascii=False)
+
+
+@mcp.resource("helix://config")
+async def resource_config() -> str:
+    """Current helix-agent configuration."""
+    result = await runtime.config_action(action="show")
+    return __import__("json").dumps(result, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Prompts (User-Controlled) — pre-crafted workflows
+# ---------------------------------------------------------------------------
+
+
+@mcp.prompt()
+async def retry_report() -> str:
+    """Generate a retry-loop detection report for the current session."""
+    stats = retry_guard.status(session_id="default")
+    return (
+        f"以下のretry_guard統計を分析し、問題があれば対策を日本語で提案してください:\n\n"
+        f"```json\n{__import__('json').dumps(stats, indent=2)}\n```\n\n"
+        f"- loop_detected が true の場合、原因と回避策を説明\n"
+        f"- repeat_count が高いツールがあれば特定\n"
+        f"- トークン節約の推奨アクションを提示"
+    )
+
+
+@mcp.prompt()
+async def optimize_tokens() -> str:
+    """Suggest token optimization strategies based on current usage patterns."""
+    return (
+        "helix-agentの以下のツールを使って、トークン最適化の提案を行ってください:\n\n"
+        "1. `retry_guard_status` でリトライループの有無を確認\n"
+        "2. 現在のブラウザバックエンド（agent-browser / playwright）を確認\n"
+        "3. `vision_compress` / `dom_compress` の活用状況を確認\n\n"
+        "改善可能なポイントを日本語で箇条書きにしてください。"
+    )
+
+
+@mcp.prompt()
+async def setup_guide() -> str:
+    """Step-by-step setup guide for helix-agent (Japanese)."""
+    return (
+        "helix-agentの初回セットアップガイドを実行してください:\n\n"
+        "1. `providers` でプロバイダー一覧を確認\n"
+        "2. `models` で利用可能モデルを確認\n"
+        "3. `config` で現在の設定を表示\n"
+        "4. ブラウザバックエンド（agent-browser推奨）の動作確認\n"
+        "5. retry_guardのテスト呼び出し\n\n"
+        "各ステップの結果を日本語で報告してください。"
+    )
+
+
 @mcp.tool()
 async def agent_types(action: str = "list", agent_type: str = "") -> dict:
     """List or show available agent type definitions.

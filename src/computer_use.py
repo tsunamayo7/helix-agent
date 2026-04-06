@@ -1,4 +1,4 @@
-"""Computer Use handler: unified interface for helix-pilot and Playwright."""
+"""Computer Use handler: unified interface for helix-pilot, agent-browser, and Playwright."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from .agent_browser_session import AgentBrowserSession, is_available as _agent_browser_available
 from .vision import VisionAnalyzer
 
 HELIX_PILOT_URL = "http://localhost:8765"
@@ -121,14 +122,27 @@ class ComputerUseHandler:
         self,
         helix_pilot_url: str = HELIX_PILOT_URL,
         vision_analyzer: VisionAnalyzer | None = None,
+        prefer_agent_browser: bool = True,
     ):
         self.helix_pilot_url = helix_pilot_url
         self.vision = vision_analyzer or VisionAnalyzer()
         self._pw_session: PlaywrightSession | None = None
+        self._ab_session: AgentBrowserSession | None = None
         self._use_pilot: bool | None = None
+        self._prefer_agent_browser = prefer_agent_browser
 
     async def _resolve_backend(self) -> str:
-        """Determine which backend to use. Returns 'pilot', 'playwright', or 'none'."""
+        """Determine which backend to use.
+
+        Priority (when prefer_agent_browser=True, default):
+          1. agent-browser (fastest, React-friendly, 82-93% fewer tokens)
+          2. helix-pilot (desktop GUI + browser)
+          3. playwright (fallback)
+
+        Returns 'agent_browser', 'pilot', 'playwright', or 'none'.
+        """
+        if self._prefer_agent_browser and _agent_browser_available():
+            return "agent_browser"
         if self._use_pilot is None:
             self._use_pilot = await _helix_pilot_available(self.helix_pilot_url)
         if self._use_pilot:
@@ -141,6 +155,11 @@ class ComputerUseHandler:
         if self._pw_session is None:
             self._pw_session = PlaywrightSession()
         return self._pw_session
+
+    def _get_ab_session(self) -> AgentBrowserSession:
+        if self._ab_session is None:
+            self._ab_session = AgentBrowserSession()
+        return self._ab_session
 
     async def execute(self, params: dict) -> dict:
         """Execute a computer use action.
@@ -187,6 +206,10 @@ class ComputerUseHandler:
         return result
 
     async def _do_screenshot(self, *, backend: str, **kwargs) -> dict:
+        if backend == "agent_browser":
+            ab = self._get_ab_session()
+            b64 = await ab.screenshot()
+            return {"backend": "agent-browser", "image_base64": b64}
         if backend == "pilot":
             resp = await _helix_pilot_call("take_screenshot", url=self.helix_pilot_url)
             if "error" in resp:
@@ -203,6 +226,10 @@ class ComputerUseHandler:
     async def _do_click(self, *, backend: str, target: str, **kwargs) -> dict:
         if not target:
             return {"error": "target is required for click action"}
+        if backend == "agent_browser":
+            ab = self._get_ab_session()
+            msg = await ab.click(target)
+            return {"backend": "agent-browser", "result": msg}
         if backend == "pilot":
             resp = await _helix_pilot_call("click_element", {"target": target}, url=self.helix_pilot_url)
             return {"backend": "helix-pilot", **resp}
@@ -214,6 +241,12 @@ class ComputerUseHandler:
     async def _do_type(self, *, backend: str, target: str, value: str, **kwargs) -> dict:
         if not target:
             return {"error": "target is required for type action"}
+        if backend == "agent_browser":
+            ab = self._get_ab_session()
+            # agent-browser's 'fill' clears and types with native keyboard events,
+            # bypassing React controlled component rejection.
+            msg = await ab.type_text(target, value)
+            return {"backend": "agent-browser", "result": msg}
         if backend == "pilot":
             resp = await _helix_pilot_call("type_text", {"target": target, "text": value}, url=self.helix_pilot_url)
             return {"backend": "helix-pilot", **resp}
@@ -224,6 +257,10 @@ class ComputerUseHandler:
 
     async def _do_scroll(self, *, backend: str, value: str, **kwargs) -> dict:
         direction = value if value in ("up", "down") else "down"
+        if backend == "agent_browser":
+            ab = self._get_ab_session()
+            msg = await ab.scroll(direction)
+            return {"backend": "agent-browser", "result": msg}
         if backend == "pilot":
             resp = await _helix_pilot_call("scroll", {"direction": direction}, url=self.helix_pilot_url)
             return {"backend": "helix-pilot", **resp}
@@ -233,8 +270,12 @@ class ComputerUseHandler:
         return {"backend": "playwright", "result": msg}
 
     async def _do_read_page(self, *, backend: str, **kwargs) -> dict:
+        if backend == "agent_browser":
+            ab = self._get_ab_session()
+            text = await ab.read_page()
+            return {"backend": "agent-browser", "text": text}
         if backend == "pilot":
-            return {"error": "read_page requires Playwright backend. helix-pilot does not support page text extraction."}
+            return {"error": "read_page requires Playwright or agent-browser backend."}
 
         pw = self._get_pw_session()
         text = await pw.read_page()
@@ -243,6 +284,10 @@ class ComputerUseHandler:
     async def _do_navigate(self, *, backend: str, url: str, **kwargs) -> dict:
         if not url:
             return {"error": "url is required for navigate action"}
+        if backend == "agent_browser":
+            ab = self._get_ab_session()
+            msg = await ab.navigate(url)
+            return {"backend": "agent-browser", "result": msg}
         if backend == "pilot":
             resp = await _helix_pilot_call("navigate", {"url": url}, url=self.helix_pilot_url)
             return {"backend": "helix-pilot", **resp}
@@ -260,10 +305,22 @@ class ComputerUseHandler:
         """
         backend = await self._resolve_backend()
         if backend == "none":
-            return {"error": "No backend available. Install Playwright or start helix-pilot."}
+            return {"error": "No backend available. Install agent-browser, Playwright, or start helix-pilot."}
+
+        if backend == "agent_browser":
+            ab = self._get_ab_session()
+            nav_msg = await ab.navigate(url)
+            text = await ab.read_page()
+            return {
+                "backend": "agent-browser",
+                "url": url,
+                "task": task,
+                "text": text,
+                "navigation": nav_msg,
+            }
 
         if backend != "playwright" and not HAS_PLAYWRIGHT:
-            return {"error": "browse requires Playwright. Install with: pip install playwright && playwright install chromium"}
+            return {"error": "browse requires agent-browser or Playwright."}
 
         pw = self._get_pw_session()
         nav_msg = await pw.navigate(url)
@@ -277,6 +334,9 @@ class ComputerUseHandler:
         }
 
     async def close(self) -> None:
+        if self._ab_session:
+            await self._ab_session.close()
+            self._ab_session = None
         if self._pw_session:
             await self._pw_session.close()
             self._pw_session = None

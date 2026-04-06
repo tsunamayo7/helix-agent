@@ -216,14 +216,14 @@ class TestComputerUseHandler:
     async def test_no_backend_available(self):
         with patch("src.computer_use._helix_pilot_available", new_callable=AsyncMock, return_value=False), \
              patch("src.computer_use.HAS_PLAYWRIGHT", False):
-            handler = ComputerUseHandler()
+            handler = ComputerUseHandler(prefer_agent_browser=False)
             handler._use_pilot = False
             result = await handler.execute({"action": "screenshot"})
             assert "error" in result
 
     @pytest.mark.asyncio
     async def test_unknown_action(self):
-        handler = ComputerUseHandler()
+        handler = ComputerUseHandler(prefer_agent_browser=False)
         handler._use_pilot = True
         result = await handler.execute({"action": "unknown_action"})
         assert "error" in result
@@ -231,7 +231,7 @@ class TestComputerUseHandler:
 
     @pytest.mark.asyncio
     async def test_missing_action(self):
-        handler = ComputerUseHandler()
+        handler = ComputerUseHandler(prefer_agent_browser=False)
         handler._use_pilot = True
         result = await handler.execute({})
         assert "error" in result
@@ -240,7 +240,7 @@ class TestComputerUseHandler:
     async def test_screenshot_with_pilot(self):
         with patch("src.computer_use._helix_pilot_call", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = {"image": "base64screenshotdata"}
-            handler = ComputerUseHandler()
+            handler = ComputerUseHandler(prefer_agent_browser=False)
             handler._use_pilot = True
             result = await handler.execute({"action": "screenshot"})
             assert result["backend"] == "helix-pilot"
@@ -253,7 +253,7 @@ class TestComputerUseHandler:
             mock_vision = AsyncMock()
             mock_vision.analyze = AsyncMock(return_value="A web page with buttons")
 
-            handler = ComputerUseHandler(vision_analyzer=mock_vision)
+            handler = ComputerUseHandler(vision_analyzer=mock_vision, prefer_agent_browser=False)
             handler._use_pilot = True
             result = await handler.execute({
                 "action": "screenshot",
@@ -265,7 +265,7 @@ class TestComputerUseHandler:
 
     @pytest.mark.asyncio
     async def test_click_requires_target(self):
-        handler = ComputerUseHandler()
+        handler = ComputerUseHandler(prefer_agent_browser=False)
         handler._use_pilot = True
         result = await handler.execute({"action": "click"})
         assert "error" in result
@@ -275,14 +275,14 @@ class TestComputerUseHandler:
     async def test_click_with_pilot(self):
         with patch("src.computer_use._helix_pilot_call", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = {"status": "clicked"}
-            handler = ComputerUseHandler()
+            handler = ComputerUseHandler(prefer_agent_browser=False)
             handler._use_pilot = True
             result = await handler.execute({"action": "click", "target": "#submit"})
             assert result["backend"] == "helix-pilot"
 
     @pytest.mark.asyncio
     async def test_type_requires_target(self):
-        handler = ComputerUseHandler()
+        handler = ComputerUseHandler(prefer_agent_browser=False)
         handler._use_pilot = True
         result = await handler.execute({"action": "type"})
         assert "error" in result
@@ -291,7 +291,7 @@ class TestComputerUseHandler:
     async def test_type_with_pilot(self):
         with patch("src.computer_use._helix_pilot_call", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = {"status": "typed"}
-            handler = ComputerUseHandler()
+            handler = ComputerUseHandler(prefer_agent_browser=False)
             handler._use_pilot = True
             result = await handler.execute({"action": "type", "target": "#input", "value": "hello"})
             assert result["backend"] == "helix-pilot"
@@ -300,14 +300,14 @@ class TestComputerUseHandler:
     async def test_scroll_with_pilot(self):
         with patch("src.computer_use._helix_pilot_call", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = {"status": "scrolled"}
-            handler = ComputerUseHandler()
+            handler = ComputerUseHandler(prefer_agent_browser=False)
             handler._use_pilot = True
             result = await handler.execute({"action": "scroll", "value": "down"})
             assert result["backend"] == "helix-pilot"
 
     @pytest.mark.asyncio
     async def test_navigate_requires_url(self):
-        handler = ComputerUseHandler()
+        handler = ComputerUseHandler(prefer_agent_browser=False)
         handler._use_pilot = True
         result = await handler.execute({"action": "navigate"})
         assert "error" in result
@@ -316,14 +316,14 @@ class TestComputerUseHandler:
     async def test_navigate_with_pilot(self):
         with patch("src.computer_use._helix_pilot_call", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = {"status": "navigated"}
-            handler = ComputerUseHandler()
+            handler = ComputerUseHandler(prefer_agent_browser=False)
             handler._use_pilot = True
             result = await handler.execute({"action": "navigate", "url": "https://example.com"})
             assert result["backend"] == "helix-pilot"
 
     @pytest.mark.asyncio
     async def test_read_page_not_supported_by_pilot(self):
-        handler = ComputerUseHandler()
+        handler = ComputerUseHandler(prefer_agent_browser=False)
         handler._use_pilot = True
         result = await handler.execute({"action": "read_page"})
         assert "error" in result
@@ -331,14 +331,14 @@ class TestComputerUseHandler:
     @pytest.mark.asyncio
     async def test_resolve_backend_pilot(self):
         with patch("src.computer_use._helix_pilot_available", new_callable=AsyncMock, return_value=True):
-            handler = ComputerUseHandler()
+            handler = ComputerUseHandler(prefer_agent_browser=False)
             backend = await handler._resolve_backend()
             assert backend == "pilot"
 
     @pytest.mark.asyncio
     async def test_resolve_backend_playwright(self):
         with patch("src.computer_use._helix_pilot_available", new_callable=AsyncMock, return_value=False):
-            handler = ComputerUseHandler()
+            handler = ComputerUseHandler(prefer_agent_browser=False)
             if HAS_PLAYWRIGHT:
                 backend = await handler._resolve_backend()
                 assert backend == "playwright"
@@ -347,7 +347,7 @@ class TestComputerUseHandler:
     async def test_browse_no_backend(self):
         with patch("src.computer_use._helix_pilot_available", new_callable=AsyncMock, return_value=False), \
              patch("src.computer_use.HAS_PLAYWRIGHT", False):
-            handler = ComputerUseHandler()
+            handler = ComputerUseHandler(prefer_agent_browser=False)
             handler._use_pilot = False
             result = await handler.browse("https://example.com")
             assert "error" in result

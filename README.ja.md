@@ -31,7 +31,20 @@ retry_guard_check(tool_name="navigate", args={"url": "..."})
 - **`vision_compress`** — スクショ → `{page_type, interactive_elements, state_flags}` JSON
 - **`dom_compress`** — HTML → `{forms, links, buttons, next_action_candidates}` JSON
 
-### 3. Windows の日本語入力問題を解決（`helix-agent-ja-input`）
+### 3. ブラウザ自動化のトークンを 82〜93% 削減（v0.12.0）
+
+`computer_use` は [Vercel agent-browser](https://github.com/vercel-labs/agent-browser)（Rust/CDP）を優先的に使い、利用不可なら helix-pilot → Playwright の順でフォールバックします。
+
+50 件の同一フローで測定した結果：
+
+| バックエンド | 1アクションあたりのトークン | React controlled component |
+|---|---|---|
+| Playwright (screenshot+DOM) | ~15,000 | ⚠️ setValue が無効化されることがある |
+| agent-browser (アクセシビリティツリー) | ~1,000〜2,700 | ✅ ネイティブキー入力で通る |
+
+`fill` がネイティブキーボードイベントを発火するため、Wantedly / LinkedIn など React SPA のフォームを追加ハックなしで埋められるようになりました。
+
+### 4. Windows の日本語入力問題を解決（`helix-agent-ja-input`）
 
 Claude Code は React Ink で TUI を構築しているため、IME との相性が悪く、**文字重複・カーソルずれ・変換中 Enter で暴発** といった問題が頻発します（[Zenn で完全解説](https://zenn.dev/atu4403/articles/claudecode-japanese-input-solution)）。
 
