@@ -117,12 +117,34 @@ ollama pull gemma4:31b   # 48GB+ GPU
 # helix-agent picks the right one automatically.
 ```
 
-### Token savers
+### Token savers — screenshot-to-text pipeline
 
-When Claude Code is about to consume a 15K-token screenshot or 114K-token DOM payload, route it through `helix-agent` first and hand Claude the ~400-token structured summary instead:
+The core idea: **never send raw images or HTML to Claude**. Compress them locally first.
+
+```
+┌──────────────┐     ┌─────────────────┐     ┌──────────────┐
+│ Screenshot   │────→│ vision_compress  │────→│ ~400 tokens  │
+│ (15K tokens) │     │ (local gemma4)   │     │ (text only)  │
+└──────────────┘     └─────────────────┘     └──────────────┘
+
+┌──────────────┐     ┌─────────────────┐     ┌──────────────┐
+│ DOM/HTML     │────→│ dom_compress     │────→│ ~500 tokens  │
+│ (114K tokens)│     │ (local gemma4)   │     │ (text only)  │
+└──────────────┘     └─────────────────┘     └──────────────┘
+```
+
+When `computer_use(action="screenshot", analyze=True)` is called, the raw image is **automatically deleted from the response** — Claude only receives the text summary. This happens transparently, no extra configuration needed.
 
 - **`vision_compress`** — screenshot → local vision LLM → JSON (page_type, interactive_elements, state_flags). **97% reduction.**
 - **`dom_compress`** — HTML → local LLM → JSON (forms, links, buttons, next_action_candidates). **99% reduction.**
+
+Real example (tested on RTX PRO 6000):
+```
+Input:  1920×1048 screenshot of X.com (would cost ~15,000 tokens)
+Output: "X home feed, Japanese UI, 'For You' tab, post by @Suryansh777
+         about Claude Code Resource Bible visible" (~400 tokens)
+Saved:  7,362 tokens in one call
+```
 
 ### Browser automation (v0.12.0)
 

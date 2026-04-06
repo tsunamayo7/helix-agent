@@ -1,0 +1,137 @@
+╔══════════════════════════════════════════════════════════════╗
+║           helix-agent v0.14.0 — Feature Demo                ║
+║  The missing retry loop guard for Claude Code               ║
+║  + Vision/DOM compression, GPU auto-routing, PathGuard      ║
+╚══════════════════════════════════════════════════════════════╝
+
+330 tests | MIT License | Works on 4GB–96GB GPU
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. GPU Auto-Detection & Model Routing
+──────────────────────────────────────
+
+$ python -c "from src.gpu_detect import detect_gpu, recommend_models; ..."
+
+GPU: NVIDIA RTX PRO 6000 Blackwell Workstation Edition (95.6GB VRAM)
+  vision:    gemma4:31b
+  text:      qwen3.5:72b
+  review:    gemma4:e4b
+  reasoning: qwen3.5:122b
+
+→ Automatically selects optimal models per task based on VRAM.
+  4GB GPU → gemma4:e2b | 16GB → gemma4:e4b | 96GB → qwen3.5:122b
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2. DOM Compress (HTML → Structured JSON)
+────────────────────────────────────────
+
+$ python -c "from src.token_saver import TokenSaver; ..."
+
+Input HTML: 419 chars (~104 tokens)
+Output JSON: 910 chars (~227 tokens)
+Model used: gemma4:31b
+
+Compressed output:
+{
+  "url": "https://example.com/login",
+  "title": "Login Page",
+  "summary": "A login page with email and password fields.",
+  "forms": [
+    {
+      "name": "login",
+      "fields": [
+        {"name": "email", "type": "email", "required": true, "placeholder": "you@example.com"},
+        {"name": "password", "type": "password", "required": true}
+      ]
+    }
+  ],
+  "links": [{"text": "Forgot password?", "href": "/forgot"}],
+  "buttons": [{"text": "Sign In", "action_hint": "submits the login form"}],
+  "errors": ["Invalid credentials"],
+  "next_action_candidates": [
+    "Enter email and password",
+    "Click Sign In",
+    "Click Forgot password?"
+  ]
+}
+
+→ Real Playwright MCP payloads: 114K tokens → ~500 tokens (99.6% reduction)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3. Retry Guard (Loop Detection)
+───────────────────────────────
+
+$ python -c "from src.token_saver import RetryGuard; ..."
+
+  Call 1: ok       (repeat: 1)
+  Call 2: ok       (repeat: 2)
+  Call 3: LOOP DETECTED!  (repeat: 3)
+  Call 4: LOOP DETECTED!  (repeat: 4)
+
+→ Detects when Claude Code repeats the same action 3+ times.
+  Prevents burning through Max plan quota on retry loops.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4. PathGuard (File Access Security)
+───────────────────────────────────
+
+$ python -c "from src.pathguard import PathGuard; ..."
+
+  [ALLOWED] C:/Development/tools/helix-agent/server.py
+  [ALLOWED] C:/Users/tomot/Documents/report.txt
+  [BLOCKED] C:/Windows/System32/config/SAM
+            Reason: Access denied — outside allowed directories
+  [BLOCKED] C:/Development/.env
+            Reason: Sensitive file blocked: .env
+  [BLOCKED] C:/Development/tools/secret.pem
+            Reason: Sensitive file type blocked: .pem
+
+→ Allowlist + blocklist prevents agents from accessing system files,
+  secrets (.env, .pem, .key), and sensitive directories.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5. Self-Evolving Memory
+───────────────────────
+
+$ python -c "from src.evolving_memory import EvolvingMemory; ..."
+
+Review model: gemma4:e4b
+Skills dir: ~/.helix-agent/skills
+Memory nudge interval: every 5 turns
+Skill nudge interval: every 8 tool calls
+
+→ Auto-saves insights to Qdrant shared memory.
+  Auto-generates reusable SKILL.md files from patterns.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6. Token Saver (Auto-Model Selection)
+─────────────────────────────────────
+
+$ python -c "from src.token_saver import TokenSaver; ..."
+
+Vision model: gemma4:31b     (auto-selected for 95.6GB VRAM)
+Text model:   qwen3.5:72b    (auto-selected for 95.6GB VRAM)
+Timeout:      120.0s
+
+→ No configuration needed. Works out of the box on any GPU.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Additional Features (not shown):
+  • agent-browser integration (CDP-based, 82–93% fewer tokens than Playwright)
+  • Vision Compress (screenshot → 400-token JSON summary)
+  • Japanese input helpers (IME composition via MCP)
+  • ReAct agent loop with Ollama/Codex providers
+  • Intelligent model routing with benchmark engine
+  • Qdrant shared memory (cross-session persistence)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+GitHub: https://github.com/tsunamayo7/helix-agent
+License: MIT | Python 3.12+ | pip install helix-agent

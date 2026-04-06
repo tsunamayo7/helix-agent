@@ -106,12 +106,34 @@ retry_guard_check(tool_name="navigate", args={"url": "..."})
 | `retry_guard_status` | セッション統計（呼び出し総数・ユニーク数・最大反復数） |
 | `retry_guard_reset` | ループ解消後の履歴クリア |
 
-### 2. トークン消費を 94〜99% 削減（`vision_compress` / `dom_compress`）
+### 2. スクリーンショット→テキスト自動変換（`vision_compress` / `dom_compress`）
 
-スクリーンショット 1 枚で 15,000 トークン、DOM 1 ページで 114,000 トークンが消費されます。これらをローカル gemma4:31b で要約し、Claude には ~400 トークンの JSON だけ渡します。
+核心のアイデア: **生画像やHTMLをClaudeに送らない。ローカルで先に圧縮する。**
 
-- **`vision_compress`** — スクショ → `{page_type, interactive_elements, state_flags}` JSON
-- **`dom_compress`** — HTML → `{forms, links, buttons, next_action_candidates}` JSON
+```
+┌──────────────┐     ┌─────────────────┐     ┌──────────────┐
+│ スクリーンショット │────→│ vision_compress  │────→│ ~400 トークン │
+│ (15,000 トークン) │     │ (ローカル gemma4) │     │ (テキストのみ) │
+└──────────────┘     └─────────────────┘     └──────────────┘
+
+┌──────────────┐     ┌─────────────────┐     ┌──────────────┐
+│ DOM/HTML     │────→│ dom_compress     │────→│ ~500 トークン │
+│ (114,000 トークン)│     │ (ローカル gemma4) │     │ (テキストのみ) │
+└──────────────┘     └─────────────────┘     └──────────────┘
+```
+
+`computer_use(action="screenshot", analyze=True)` を呼ぶと、生画像は**レスポンスから自動削除**され、Claudeはテキスト要約のみ受け取ります。追加設定不要で透過的に動作します。
+
+- **`vision_compress`** — スクショ → ローカルVision LLM → JSON（97%削減）
+- **`dom_compress`** — HTML → ローカルLLM → JSON（99%削減）
+
+実測例（RTX PRO 6000 で検証）:
+```
+入力:  1920×1048 の X.com スクリーンショット（通常 ~15,000 トークン）
+出力:  "Xホームフィード、日本語UI、おすすめタブ、@Suryansh777 の
+        Claude Code Resource Bible 投稿が表示" (~400 トークン)
+節約:  1回の呼び出しで 7,362 トークン節約
+```
 
 ### 3. ブラウザ自動化のトークンを 82〜93% 削減（v0.12.0）
 
