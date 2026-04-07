@@ -49,14 +49,14 @@ MODEL_TIERS = {
     },
     # 48GB+ GPU (RTX PRO 6000, A6000, etc.)
     (32, 64): {
-        "vision": "gemma4:31b",
+        "vision": "qwen3-vl:32b",
         "text": "gemma4:31b",
         "review": "gemma4:e4b",
         "reasoning": "gemma4:31b",
     },
     # 64GB+ GPU (RTX PRO 6000 96GB, multi-GPU, etc.)
     (64, 1000): {
-        "vision": "gemma4:31b",
+        "vision": "qwen3-vl:32b",
         "text": "qwen3.5:72b",
         "review": "gemma4:e4b",
         "reasoning": "qwen3.5:122b",

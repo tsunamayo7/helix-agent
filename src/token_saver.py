@@ -49,6 +49,29 @@ Output STRICT JSON only (no prose, no markdown fences). Schema:
 
 Keep arrays short. Prioritize signal over completeness. Target output under 400 tokens."""
 
+VISION_AUTO_PROMPT = """この画像を見て、何が写っているかを詳細に日本語で説明してください。
+
+あなたは優秀な画像分析者です。型にはめず、見えるものをそのまま正確に伝えてください。
+
+## 必ず含めること
+1. **何の画像か** — 最初に一言で（例: 「アニメ風の女の子のイラスト」「手書きのフローチャート」「Chromeのエラー画面」）
+2. **見えるもの全て** — テキスト、図、人物、UI要素、手書き、数式、コード、何でも。読めるテキストはそのまま書き起こす
+3. **空間的な配置** — 何がどこにあるか（左上に〇〇、中央に△△、右下に□□）
+
+## 画像の種類に応じて追加で含めること（該当するもの全て）
+- **人物・キャラクター**: 外見（髪・服・体型）、ポーズ（手足の位置・体の向き）、表情（目・口・眉）、視線の方向
+- **イラスト・アート**: 画風、色使い、構図（アングル・フレーミング）、雰囲気
+- **写真**: 撮影状況（屋内外・光・季節）、被写体の状態
+- **UI・スクリーンショット**: アプリ名、画面状態、ボタンやフォームの内容、エラーの有無
+- **図・チャート・ER図**: 種類、ノードや矢印の関係、数値やラベル
+- **手書き**: 書き起こし（読める範囲で全て）、図の説明、判読の確信度
+- **文書・コード**: テキスト内容、言語、構造
+- **複合（複数要素混在）**: 全ての要素を漏れなく。「左半分は手書きメモ、右半分はグラフ」等
+
+## 出力形式
+自由な文章で構いません。ただし最後に1行で要約をつけてください:
+要約: （この画像を1文で説明）"""
+
 
 # --- DOM Compression ------------------------------------------------------
 
@@ -96,14 +119,16 @@ class TokenSaver:
         image_base64: str = "",
         custom_prompt: str = "",
         model: str = "",
+        mode: str = "auto",
     ) -> dict[str, Any]:
-        """Compress a screenshot into a structured summary.
+        """Compress an image into a structured summary.
 
         Args:
             image_path: Path to image file (alternative to image_base64).
             image_base64: Base64-encoded image data.
             custom_prompt: Override the default extraction prompt.
             model: Override the vision model.
+            mode: "ui" for screenshots (default), "describe" for illustrations/photos.
 
         Returns:
             Dict with `summary` (structured data), `raw_response`, `tokens_saved_estimate`.
@@ -120,7 +145,14 @@ class TokenSaver:
             except Exception as e:
                 return {"error": f"Failed to read image: {e}"}
 
-        prompt = custom_prompt or VISION_COMPRESS_PROMPT
+        if custom_prompt:
+            prompt = custom_prompt
+        elif mode == "auto":
+            prompt = VISION_AUTO_PROMPT
+        elif mode == "ui":
+            prompt = VISION_COMPRESS_PROMPT
+        else:
+            prompt = VISION_AUTO_PROMPT
         use_model = model or self.vision_model
 
         raw = await self.vision.analyze(image_base64, prompt=prompt, model=use_model)
@@ -130,8 +162,15 @@ class TokenSaver:
         # Estimate: avg screenshot ~8K tokens uncompressed, summary ~400 tokens
         estimated_saved = 8000 - _estimate_tokens(raw)
 
+        if structured:
+            summary = structured
+        elif mode == "auto":
+            summary = {"description": raw}
+        else:
+            summary = {"_unparsed": raw[:600]}
+
         return {
-            "summary": structured if structured else {"_unparsed": raw[:600]},
+            "summary": summary,
             "raw_response": raw,
             "tokens_saved_estimate": max(estimated_saved, 0),
             "model": use_model,

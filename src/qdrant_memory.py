@@ -51,19 +51,29 @@ class QdrantMemory:
         except (httpx.ConnectError, httpx.TimeoutException):
             return False
 
-    async def search(self, query: str, top_k: int | None = None) -> list[dict]:
+    async def search(
+        self,
+        query: str,
+        top_k: int | None = None,
+        source: str | None = None,
+        category: str | None = None,
+    ) -> list[dict]:
         vector = await self._embed(query)
         k = top_k or self.config.top_k
+
+        must_filters = [
+            {"key": "user_id", "match": {"value": self.config.user_id}}
+        ]
+        if source:
+            must_filters.append({"key": "source", "match": {"value": source}})
+        if category:
+            must_filters.append({"key": "category", "match": {"value": category}})
 
         payload = {
             "vector": vector,
             "limit": k,
             "score_threshold": self.config.score_threshold,
-            "filter": {
-                "must": [
-                    {"key": "user_id", "match": {"value": self.config.user_id}}
-                ]
-            },
+            "filter": {"must": must_filters},
             "with_payload": True,
         }
 

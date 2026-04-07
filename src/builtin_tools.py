@@ -156,12 +156,16 @@ async def _tool_search_memory(params: str) -> str:
         data = json.loads(params)
         query = data.get("query", params)
         top_k = data.get("top_k", 5)
+        source = data.get("source", None)
+        category = data.get("category", None)
     except (json.JSONDecodeError, AttributeError):
         query = params
         top_k = 5
+        source = None
+        category = None
 
     try:
-        hits = await _memory.search(query, top_k=top_k)
+        hits = await _memory.search(query, top_k=top_k, source=source, category=category)
     except Exception as e:
         return f"Memory search error: {e}"
 
@@ -179,6 +183,32 @@ async def _tool_search_memory(params: str) -> str:
     return "\n".join(lines)
 
 
+_CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "vtuber": ["vtuber", "live2d", "tha4", "tts", "voicevox", "irodori", "avatar", "motion", "lip sync", "aituber"],
+    "coding": ["code", "python", "typescript", "rust", "bug", "test", "refactor", "commit", "pr", "review", "lint"],
+    "mcp": ["mcp", "model context protocol", "fastmcp", "tool_call", "mcp server"],
+    "genai": ["comfyui", "stable diffusion", "lora", "checkpoint", "image gen", "video gen", "flux", "wan"],
+    "llm": ["ollama", "gemma", "qwen", "claude", "gpt", "codex", "nemotron", "llm", "embedding", "rag"],
+    "security": ["security", "cve", "glassworm", "injection", "vulnerability", "exploit"],
+    "infra": ["docker", "qdrant", "supervisor", "daemon", "scheduler", "tailscale", "health"],
+    "x_ops": ["twitter", "x.com", "tweet", "post", "follower", "impression", "engagement"],
+    "job": ["転職", "求人", "resume", "portfolio", "interview", "salary"],
+}
+
+
+def _auto_categorize(text: str) -> str | None:
+    """テキストからカテゴリを自動推定する."""
+    text_lower = text.lower()
+    scores: dict[str, int] = {}
+    for cat, keywords in _CATEGORY_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in text_lower)
+        if score > 0:
+            scores[cat] = score
+    if not scores:
+        return None
+    return max(scores, key=scores.get)
+
+
 async def _tool_add_memory(params: str) -> str:
     """Add a memory to shared Qdrant storage."""
     try:
@@ -192,12 +222,19 @@ async def _tool_add_memory(params: str) -> str:
     if not text:
         return "Error: 'text' is required"
 
+    # 自動カテゴリ推定（明示的に指定されていない場合）
+    if "category" not in metadata:
+        auto_cat = _auto_categorize(text)
+        if auto_cat:
+            metadata["category"] = auto_cat
+
     try:
         point_id = await _memory.add(text, metadata=metadata or None)
     except Exception as e:
         return f"Memory add error: {e}"
 
-    return f"Memory saved (id={point_id})"
+    cat_info = f", category={metadata.get('category', 'none')}" if metadata.get("category") else ""
+    return f"Memory saved (id={point_id}{cat_info})"
 
 
 # --- Shell (restricted) ---
@@ -352,6 +389,73 @@ async def _tool_computer_use(params: str) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
+async def _tool_web_search(params: str) -> str:
+    """Search Qdrant memory and optionally SearXNG for latest information."""
+    import urllib.request
+    import urllib.parse
+
+    try:
+        data = json.loads(params) if params.strip().startswith("{") else {"query": params}
+    except (json.JSONDecodeError, AttributeError):
+        data = {"query": str(params)}
+
+    query = data.get("query", "")
+    if not query:
+        return "Error: 'query' is required"
+
+    top_k = data.get("top_k", 5)
+    source_filter = data.get("source", None)  # e.g. "x-feed-collector-twitter"
+    results_parts: list[str] = []
+
+    # Layer 1: Qdrant Memory Server (localhost:8080) - POST /search
+    try:
+        search_body = json.dumps({"query": query, "limit": top_k}).encode("utf-8")
+        req = urllib.request.Request(
+            "http://localhost:8080/search",
+            data=search_body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read().decode())
+        hits = result.get("memories", [])
+        if source_filter:
+            hits = [h for h in hits if h.get("metadata", {}).get("source", "") == source_filter]
+        if hits:
+            results_parts.append("=== Qdrant Memory Results ===")
+            for i, r in enumerate(hits):
+                text = r.get("text", "")[:400]
+                score = r.get("score", 0)
+                meta = r.get("metadata", {})
+                src = meta.get("source", "unknown")
+                results_parts.append(f"[{i+1}] (score={score:.3f}, source={src}) {text}")
+    except Exception as e:
+        results_parts.append(f"Qdrant search error: {e}")
+
+    # Layer 2: SearXNG (localhost:1200) - if available
+    try:
+        searx_url = f"http://localhost:1200/search?q={urllib.parse.quote(query)}&format=json&engines=google,duckduckgo&language=ja"
+        req = urllib.request.Request(searx_url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            searx_result = json.loads(resp.read().decode())
+        web_results = searx_result.get("results", [])[:5]
+        if web_results:
+            results_parts.append("\n=== Web Search Results (SearXNG) ===")
+            for i, r in enumerate(web_results):
+                title = r.get("title", "")
+                url = r.get("url", "")
+                snippet = r.get("content", "")[:300]
+                results_parts.append(f"[{i+1}] {title}\n    URL: {url}\n    {snippet}")
+    except Exception:
+        # SearXNG not available - silent fallback
+        pass
+
+    if not results_parts:
+        return f"No results found for: {query}"
+
+    return "\n".join(results_parts)
+
+
 async def _tool_browse(params: str) -> str:
     """Browse a URL and extract page text."""
     try:
@@ -479,6 +583,23 @@ def create_full_registry() -> ToolRegistry:
                 "task": {"type": "string", "description": "What to do with the page content"},
             },
             "required": ["url"],
+        },
+        is_read_only=True,
+    ))
+
+    registry.register(Tool(
+        name="web_search",
+        description="Search latest information from Qdrant memory (x-feed-collector data) and SearXNG web search. Input: JSON {\"query\": \"...\", \"top_k\": 5, \"source\": \"x-feed-collector-twitter\"} or plain query string",
+        parameters={"json_or_query": "{query, top_k?, source?} or plain string"},
+        handler=_tool_web_search,
+        json_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+                "top_k": {"type": "integer", "description": "Number of results (default 5)"},
+                "source": {"type": "string", "description": "Filter by source (e.g. x-feed-collector-twitter)"},
+            },
+            "required": ["query"],
         },
         is_read_only=True,
     ))

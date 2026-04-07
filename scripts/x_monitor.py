@@ -44,9 +44,12 @@ DEFAULT_KEYWORDS = [
     # 生成AI全般
     "AI coding assistant OSS",
     "ComfyUI Stable Diffusion workflow",
-    # 日本産LLM / AIVTuber
+    # 日本産LLM / AIVTuber / TTS
     "Japanese LLM PLaMo Swallow",
     "AI VTuber streaming automation",
+    "VOICEVOX Style-Bert-VITS2 TTS",
+    "Irodori-TTS AITuberKit",
+    "RVC voice cloning local",
     # ハード/自動化
     "NVIDIA RTX VRAM local AI",
     "developer automation AI agent",
@@ -55,6 +58,12 @@ DEFAULT_KEYWORDS = [
     "browser_use AI browser automation",
     "OpenAI Codex new release",
     "Google Gemma update",
+    # セキュリティ監視
+    "Claude Code vulnerability CVE security",
+    "MCP server security exploit",
+    "Ollama security update patch",
+    "npm supply chain attack 2026",
+    "GitHub Actions security advisory",
 ]
 
 DEFAULT_OUTPUT_DIR = Path.home() / ".helix-agent" / "x_monitor"
@@ -103,7 +112,7 @@ Return a JSON array of recent developer discussions about these topics. Max 8 en
 
     # OOM/VRAM不足時は自動的に小さいモデルにフォールバック
     # VRAMベース選択を先に試行
-    from scripts.x_rag_learner import select_model_by_vram
+    from x_rag_learner import select_model_by_vram
     available_set = {m["name"] for m in await client.list_models()}
     vram_model = select_model_by_vram(available_set)
     if vram_model is None:

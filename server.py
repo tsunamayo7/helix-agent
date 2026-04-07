@@ -319,23 +319,31 @@ async def vision_compress(
     image_base64: str = "",
     custom_prompt: str = "",
     model: str = "",
+    mode: str = "auto",
 ) -> dict:
-    """Compress a screenshot into a compact text summary using a local vision model — 97% token saving.
+    """Compress an image into a compact text summary using a local vision model — 97% token saving.
 
-    ALWAYS use this instead of sending raw screenshots to Claude. A raw screenshot costs
+    ALWAYS use this instead of sending raw images to Claude. A raw image costs
     ~15,000 tokens; this returns ~400 tokens of structured text. The model is auto-selected
     based on your GPU (8GB: gemma4:e2b, 16GB: e4b, 24GB: 26b, 48GB+: 31b).
 
+    Modes:
+    - "auto": Auto-detect image type and apply appropriate analysis (default, recommended)
+      Detects: screenshot/illustration/photo/chart/diagram/document
+      Then applies type-specific detailed analysis (Japanese output)
+    - "ui": Screenshots only — extracts buttons, text, layout, errors
+
     Use cases:
-    - Screen verification after browser/GUI actions
-    - Checking UI state, error messages, dialog boxes
-    - Reading form content, page layout, visible text
+    - mode="auto": ANY image — auto-detects type, describes composition/subjects/poses
+      for illustrations/photos, extracts UI elements for screenshots, reads charts/diagrams
+    - mode="ui": Force screenshot-specific extraction only
 
     Args:
-        image_path: Local path to a PNG/JPEG screenshot (alternative to image_base64).
+        image_path: Local path to a PNG/JPEG image (alternative to image_base64).
         image_base64: Base64-encoded image data (alternative to image_path).
         custom_prompt: Override the default extraction prompt.
         model: Override the auto-selected vision model.
+        mode: "ui" for screenshots, "describe" for illustrations/photos.
 
     Returns:
         Dict with `summary` (structured text), `raw_response`, `tokens_saved_estimate`.
@@ -345,6 +353,7 @@ async def vision_compress(
         image_base64=image_base64,
         custom_prompt=custom_prompt,
         model=model,
+        mode=mode,
     )
 
 
@@ -573,6 +582,48 @@ async def get_skill(name: str) -> dict:
     if content is None:
         return {"error": f"Skill '{name}' not found", "available": [s["name"] for s in evolving_memory._skills.list_skills()]}
     return {"name": name, "content": content}
+
+
+@mcp.tool()
+async def code_review(
+    target: str,
+    context: str = "",
+    tech_context: str = "",
+    web_search: bool = True,
+    generate_patch: bool = False,
+    skip_sonnet: bool = False,
+    codex_consult: bool = False,
+    max_files: int = 20,
+) -> dict:
+    """3-Layer Code Review Pipeline: gemma4($0) + Sonnet verification.
+
+    Reviews code using local LLM (gemma4) with RAG/web_search,
+    then optionally verifies with Sonnet and consults Codex for complex bugs.
+
+    Args:
+        target: File or directory path to review
+        context: Additional context (e.g. "VTuber avatar generation tool")
+        tech_context: Known libraries to avoid false positives
+        web_search: Enable web_search for latest best practices
+        generate_patch: Generate unified diff fix patches
+        skip_sonnet: Skip Sonnet verification (gemma4 only, fastest)
+        codex_consult: Consult Codex as expert for P1 issues
+        max_files: Maximum files to review (default 20)
+    """
+    from src.code_review import CodeReviewPipeline
+
+    pipeline = CodeReviewPipeline(helix)
+    result = await pipeline.run(
+        target=target,
+        context=context,
+        tech_context=tech_context,
+        web_search=web_search,
+        generate_patch=generate_patch,
+        skip_sonnet=skip_sonnet,
+        codex_consult=codex_consult,
+        max_files=max_files,
+    )
+    return result.to_dict()
 
 
 if __name__ == "__main__":

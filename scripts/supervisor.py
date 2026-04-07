@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
@@ -29,6 +30,11 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Windows cp932対策
+if os.name == "nt":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ---------------------------------------------------------------------------
 # 設定
@@ -75,6 +81,22 @@ DAEMONS = {
         "interval_min": 30,
         "stale_threshold_min": 45,   # 30分間隔なので45分まで許容
         "description": "X情報収集",
+        "critical": False,
+    },
+}
+
+# 常駐サービス（HTTPヘルスチェックで監視、ハートビートではなくHTTP応答で判定）
+SERVICES = {
+    "clip_bridge": {
+        "health_url": "http://localhost:9999/health",
+        "start_cmd": ['pythonw', 'C:/Development/tools/clip-bridge/clip_server.py'],
+        "description": "Clipboard Bridge (port 9999)",
+        "critical": False,
+    },
+    "health_server": {
+        "health_url": "http://localhost:8800/health",
+        "start_cmd": None,  # タスクスケジューラ管理
+        "description": "Health Server (port 8800)",
         "critical": False,
     },
 }
@@ -295,8 +317,35 @@ def record_event_to_memory(event_type: str, message: str) -> None:
 # メイン監視
 # ---------------------------------------------------------------------------
 
+def export_config():
+    """DAEMONS/SERVICESの設定をJSONに書き出す（helix_status.pyが読む）."""
+    config_file = HELIX_DIR / "supervisor_config.json"
+    data = {
+        "daemons": {
+            name: {
+                "interval_min": cfg["interval_min"],
+                "stale_threshold_min": cfg["stale_threshold_min"],
+                "description": cfg["description"],
+                "critical": cfg["critical"],
+            }
+            for name, cfg in DAEMONS.items()
+        },
+        "services": {
+            name: {
+                "health_url": cfg["health_url"],
+                "description": cfg["description"],
+                "critical": cfg.get("critical", False),
+            }
+            for name, cfg in SERVICES.items()
+        },
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    config_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def run_supervision() -> dict:
     """全デーモンの監視・復旧を実行."""
+    export_config()  # 設定JSONを書き出し
     state = load_state()
     now = datetime.now(timezone.utc)
     results = {"checked": 0, "healthy": 0, "restarted": 0, "alerts": []}
@@ -331,6 +380,30 @@ def run_supervision() -> dict:
                 record_event_to_memory("restart", f"{name} を再起動（{int(age)}分間応答なし）")
         else:
             results["healthy"] += 1
+
+    # 常駐サービスのヘルスチェック
+    for name, svc in SERVICES.items():
+        results["checked"] += 1
+        try:
+            req = urllib.request.Request(svc["health_url"])
+            urllib.request.urlopen(req, timeout=3)
+            results["healthy"] += 1
+        except Exception:
+            # サービスダウン → 再起動試行
+            if svc.get("start_cmd"):
+                try:
+                    subprocess.Popen(
+                        svc["start_cmd"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    msg = f"Supervisor: {name} ({svc['description']}) を再起動"
+                    results["alerts"].append(msg)
+                    results["restarted"] += 1
+                except Exception:
+                    pass
+            else:
+                msg = f"Supervisor: {name} ({svc['description']}) 応答なし（手動確認要）"
+                results["alerts"].append(msg)
 
     # 通知（criticalとnon-criticalで頻度を分ける）
     critical_alerts = [a for a in results["alerts"] if any(
@@ -417,6 +490,16 @@ def show_status():
     except Exception:
         print(f"\n=== 共有記憶 (Qdrant) ===")
         print(f"  ステータス: [NG] 接続不可")
+
+    # 常駐サービス状態
+    print(f"\n=== 常駐サービス ===")
+    for name, svc in SERVICES.items():
+        try:
+            req = urllib.request.Request(svc["health_url"])
+            urllib.request.urlopen(req, timeout=3)
+            print(f"  {name} ({svc['description']}): [OK]")
+        except Exception:
+            print(f"  {name} ({svc['description']}): [NG]")
 
 
 def restart_all():
