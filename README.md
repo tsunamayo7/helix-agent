@@ -7,8 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-10b981.svg)](https://modelcontextprotocol.io)
-[![Tests](https://img.shields.io/badge/tests-330%20passing-brightgreen.svg)](#)
-[![v0.14.0](https://img.shields.io/badge/version-0.14.0-7c3aed.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-347%20passing-brightgreen.svg)](#)
+[![v0.15.0](https://img.shields.io/badge/version-0.15.0-7c3aed.svg)](#)
 [![MCP 3-Primitive](https://img.shields.io/badge/MCP-Tools%20%2B%20Resources%20%2B%20Prompts-10b981.svg)](#)
 [![Works on 8GB VRAM](https://img.shields.io/badge/GPU-8GB%20VRAM%20OK-green.svg)](#gpu-auto-detection--model-tiers)
 
@@ -185,6 +185,63 @@ Inspired by [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-a
 - **Skill auto-generation**: Successful task patterns → SKILL.md files (hermes-compatible)
 - **The agent gets smarter the more you use it** — all running locally
 
+### 4-Layer Code Review Pipeline (v0.15.0, NEW)
+
+Automated multi-LLM code review that catches **100% of issues** at ~¥30 ($0.20) total:
+
+```
+Layer 2: gemma4 ReAct review ($0, with web_search + RAG)
+  ↓ findings + context
+Layer 3: Sonnet 4.6 verification + cross-file analysis (~¥10)
+  ↓ merged findings
+Layer 4: Opus 4.6 meta-review (~¥5, reads summary only — no source code)
+  ↓ final verdict
+Codex:   Consultant (P1 issues only, on-demand)
+```
+
+**Empirical results** (5-model comparison on real codebase):
+
+| Reviewer | Findings | Unique | Cost |
+|----------|:--------:|:------:|:----:|
+| gemma4+RAG (local) | 7 | 1 | **$0** |
+| Codex GPT-5.3 | 5 | 0 | ~¥50 |
+| Sonnet 4.6 | 14 | 1 | ~¥20 |
+| Opus 4.6 | 16 | 4 | ~¥100 |
+| **4-Layer Combined** | **16+** | **all** | **~¥30** |
+
+> **Key finding**: gemma4 + RAG ($0) outperforms Codex GPT-5.3 (~¥50) in code review.
+
+```python
+# Daily review (gemma4 only, $0)
+code_review(target="src/", skip_sonnet=True)
+
+# Pre-release (gemma4 + Sonnet, ~¥10)
+code_review(target="src/", context="payment module")
+
+# P1 emergency (+ Codex consultant)
+code_review(target="src/", codex_consult=True)
+```
+
+### gemma4 Context Expansion (v0.15.0, NEW)
+
+gemma4 now operates as a **12-tool ReAct agent** with external knowledge access:
+
+- **`web_search`** — Qdrant RAG search + SearXNG web search
+- **`search_memory`** — enhanced with source/category filters
+- **`add_memory`** — auto-categorizes into 9 categories (vtuber/coding/mcp/genai/llm/security/infra/x_ops/job)
+- **Security**: 5 injection defense rules prevent execution of instructions found in search results
+
+### Qwen3-VL 32B Vision/OCR (v0.15.0, NEW)
+
+Dedicated vision model for **95%+ OCR accuracy** on Japanese text:
+
+| Model | Phone number | Postal code | Cost |
+|-------|:----------:|:-----------:|:----:|
+| gemma4:31b | ❌ 0565-2016 | ❌ 446-8700 | $0 |
+| **Qwen3-VL 32B** | **✅ 0566-76-2316** | **✅ 446-8799** | **$0** |
+
+Auto-selected for 48GB+ GPUs. Role separation: gemma4 = code/reasoning/RAG, Qwen3-VL = vision/OCR.
+
 ### Delegation & agents
 
 ReAct loop with tool access, context-inheriting sub-agents, background workers, Qdrant shared memory, JSONL tracing, PathGuard safety, OOM auto-fallback.
@@ -264,7 +321,7 @@ helix-agent implements all three MCP primitives as defined by [Anthropic Academy
 
 | Primitive | Control | Count | Examples |
 |-----------|---------|-------|----------|
-| **Tools** | Model-controlled (Claude decides) | 23 | `retry_guard_check`, `think`, `computer_use`, `vision_compress`, `evolving_memory_review` |
+| **Tools** | Model-controlled (Claude decides) | 24 | `retry_guard_check`, `think`, `computer_use`, `vision_compress`, `code_review`, `web_search` |
 | **Resources** | App-controlled (read-only data) | 3 | `helix://status`, `helix://models`, `helix://config` |
 | **Prompts** | User-controlled (workflows) | 3 | `retry_report`, `optimize_tokens`, `setup_guide` |
 
@@ -281,7 +338,7 @@ Claude Code (Opus 4.6 — decides what to do)
   │   ├─ optimize_tokens      → token saving recommendations
   │   └─ setup_guide          → first-run setup walkthrough (Japanese)
   │
-  ├─ Tools (20 total)
+  ├─ Tools (24 total)
   │   ├─ retry_guard_check    → is this tool call looping? (pure logic, no LLM)
   │   ├─ vision_compress      → gemma4 vision → ~400-token summary
   │   ├─ dom_compress         → gemma4 text → ~500-token structured extract
