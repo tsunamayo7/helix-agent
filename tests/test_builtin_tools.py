@@ -177,7 +177,7 @@ class TestMemoryTools:
             result = await _tool_search_memory(json.dumps({"query": "test", "top_k": 3}))
             assert "test memory" in result
             assert "0.95" in result
-            mock_mem.search.assert_called_once_with("test", top_k=3)
+            mock_mem.search.assert_called_once_with("test", top_k=3, source=None, category=None)
 
     @pytest.mark.asyncio
     async def test_search_memory_with_plain_string(self):
@@ -236,4 +236,5 @@ class TestFullRegistry:
         assert "fork_task" in names
         assert "computer_use" in names
         assert "browse" in names
-        assert len(names) == 11
+        assert "web_search" in names
+        assert len(names) == 12

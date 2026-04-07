@@ -197,8 +197,12 @@ async def test_vision_compress_parses_structured_response():
 async def test_vision_compress_unparsable_response_preserved():
     ts = TokenSaver()
     with patch.object(ts.vision, "analyze", new=AsyncMock(return_value="This is not JSON at all")):
+        # Default mode="auto" returns description key for free-form text
         result = await ts.vision_compress(image_base64="fake_b64_data")
-    assert "_unparsed" in result["summary"]
+        assert "description" in result["summary"]
+        # mode="ui" returns _unparsed for non-JSON responses
+        result_ui = await ts.vision_compress(image_base64="fake_b64_data", mode="ui")
+        assert "_unparsed" in result_ui["summary"]
 
 
 @pytest.mark.asyncio

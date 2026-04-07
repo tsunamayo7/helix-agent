@@ -11,6 +11,7 @@ Windowsタスクスケジューラから5分間隔で実行される想定。
     python scripts/watchdog.py reset     # アラート状態リセット
 """
 
+import io
 import json
 import os
 import subprocess
@@ -19,6 +20,11 @@ import time
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+# Windows cp932対策
+if os.name == "nt":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 # ---------------------------------------------------------------------------
 # 設定
@@ -199,7 +205,36 @@ def run_check() -> list[str]:
             except (ValueError, TypeError):
                 pass
 
-    # 2. hw_monitorの鮮度チェック
+    # 2. supervisor相互監視（supervisorが死んでいたら再起動）
+    try:
+        hb_file = Path.home() / ".helix-agent" / "heartbeats" / "supervisor.json"
+        if hb_file.exists():
+            hb = json.loads(hb_file.read_text(encoding="utf-8"))
+            hb_time = datetime.fromisoformat(hb["timestamp"])
+            age_min = (now - hb_time).total_seconds() / 60
+            if age_min > 10:  # supervisorは3分間隔なので10分で異常
+                # supervisorを再起動
+                supervisor_script = Path(__file__).resolve().parent / "supervisor.py"
+                subprocess.Popen(
+                    [sys.executable, str(supervisor_script)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                if should_alert(state, "supervisor_restart"):
+                    alerts.append(
+                        f"**Watchdog**: supervisorが{int(age_min)}分間応答なし。再起動しました。"
+                    )
+                    state.setdefault("last_alert_time", {})["supervisor_restart"] = now_str
+        else:
+            # ハートビートファイルすらない
+            supervisor_script = Path(__file__).resolve().parent / "supervisor.py"
+            subprocess.Popen(
+                [sys.executable, str(supervisor_script)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+    except Exception:
+        pass
+
+    # 3. hw_monitorの鮮度チェック
     hw_exists, hw_age_min = check_hw_monitor_freshness()
     if hw_exists and hw_age_min is not None:
         if hw_age_min >= HW_STALE_WARN_MIN:

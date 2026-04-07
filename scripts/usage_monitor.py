@@ -168,14 +168,32 @@ def predict_exhaustion(totals: dict, period_start: datetime) -> dict | None:
 # ---------------------------------------------------------------------------
 
 def get_usage_from_browser() -> dict | None:
-    """claude.ai/settings/usage ページから使用率を取得（claude-in-chrome経由）.
+    """claude.ai/settings/usage ページから使用率を取得（agent-browser CDP経由）.
 
-    重い処理なので、15分に1回程度の実行を想定。
-    ブラウザが起動していない場合はスキップ。
+    15分に1回程度の実行を想定。Chrome CDPポートが必要。
     """
-    # この機能はclaude-in-chromeが利用可能なときのみ
-    # assistant_daemonのタスクとして非同期実行も可能
-    return None  # TODO: 実装はclaude-in-chrome統合時
+    usage_file = Path.home() / ".helix-agent" / "claude_usage" / "latest.json"
+    try:
+        # claude_usage_scraper.py を呼び出し
+        scraper = Path(__file__).resolve().parent / "claude_usage_scraper.py"
+        if not scraper.exists():
+            return None
+        result = subprocess.run(
+            [sys.executable, str(scraper), "fetch", "--json"],
+            capture_output=True, text=True, timeout=30, encoding="utf-8",
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return json.loads(result.stdout.strip())
+    except Exception:
+        pass
+    # フォールバック: 最新ファイルがあればそれを読む
+    if usage_file.exists():
+        try:
+            data = json.loads(usage_file.read_text(encoding="utf-8"))
+            return data
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +307,38 @@ def run_check() -> dict:
                 state["last_alert"] = datetime.now(timezone.utc).isoformat()
             result["alert"] = "warn"
 
+    # ブラウザ使用率取得（CDP接続可能な場合のみ）
+    browser_usage = get_usage_from_browser()
+    if browser_usage:
+        result["browser_usage"] = browser_usage
+        # ブラウザ使用率ベースのアラート
+        weekly_pct = browser_usage.get("weekly_all", {}).get("percent", 0)
+        sonnet_pct = browser_usage.get("sonnet_only", {}).get("percent", 0)
+        if weekly_pct >= 85 or sonnet_pct >= 85:
+            level = "critical_browser"
+            alert_msg = (
+                f"**Claude使用率 CRITICAL**\n"
+                f"- 週間(全モデル): {weekly_pct}%\n"
+                f"- Sonnetのみ: {sonnet_pct}%\n"
+                f"リセット: {browser_usage.get('weekly_all', {}).get('reset', '?')}"
+            )
+            if should_alert(state, level):
+                notify(alert_msg)
+                state["alert_level"] = level
+                state["last_alert"] = datetime.now(timezone.utc).isoformat()
+        elif weekly_pct >= 70 or sonnet_pct >= 70:
+            level = "warn_browser"
+            alert_msg = (
+                f"**Claude使用率 WARNING**\n"
+                f"- 週間(全モデル): {weekly_pct}%\n"
+                f"- Sonnetのみ: {sonnet_pct}%\n"
+                f"リセット: {browser_usage.get('weekly_all', {}).get('reset', '?')}"
+            )
+            if should_alert(state, level):
+                notify(alert_msg)
+                state["alert_level"] = level
+                state["last_alert"] = datetime.now(timezone.utc).isoformat()
+
     save_state(state)
 
     # 監視データをファイルにも保存（他のデーモンから参照用）
@@ -330,6 +380,24 @@ def show_status():
         print(f"=== 消費ペース予測 ===")
         print(f"  現在のペース: {prediction['tokens_per_hour']:,} tok/h")
         print(f"  リセットまでの予測消費: {prediction['projected_total_at_reset']:,} tokens")
+
+    # ブラウザ使用率（claude.ai公式データ）
+    usage_file = Path.home() / ".helix-agent" / "claude_usage" / "latest.json"
+    if usage_file.exists():
+        try:
+            browser_data = json.loads(usage_file.read_text(encoding="utf-8"))
+            ts = browser_data.get("timestamp", "?")
+            weekly = browser_data.get("weekly_all", {})
+            sonnet = browser_data.get("sonnet_only", {})
+            session = browser_data.get("session", {})
+            print()
+            print(f"=== 公式使用率 (claude.ai, {ts}) ===")
+            if session.get("percent") is not None:
+                print(f"  セッション:    {session['percent']}%  (リセット: {session.get('reset', '?')})")
+            print(f"  週間(全モデル): {weekly.get('percent', '?')}%  (リセット: {weekly.get('reset', '?')})")
+            print(f"  Sonnetのみ:    {sonnet.get('percent', '?')}%  (リセット: {sonnet.get('reset', '?')})")
+        except (json.JSONDecodeError, OSError):
+            pass
 
 
 def show_reset_info():

@@ -484,7 +484,7 @@ class TestRegistryPhase3:
     def test_total_tool_count(self):
         registry = create_full_registry()
         names = registry.list_names()
-        assert len(names) == 11  # 9 Phase 2 + 2 Phase 3
+        assert len(names) == 12  # 9 Phase 2 + 2 Phase 3 + 1 web_search
 
     def test_read_only_flags_phase3(self):
         registry = create_full_registry()
