@@ -332,11 +332,28 @@ def run_supervision() -> dict:
         else:
             results["healthy"] += 1
 
-    # 通知
-    if results["alerts"] and should_alert(state, "supervision"):
-        combined = "\n".join(results["alerts"])
-        notify(combined)
-        state.setdefault("last_alert", {})["supervision"] = now.isoformat()
+    # 通知（criticalとnon-criticalで頻度を分ける）
+    critical_alerts = [a for a in results["alerts"] if any(
+        d["critical"] for d in DAEMONS.values() if d["description"] in a
+    )]
+    noncritical_alerts = [a for a in results["alerts"] if a not in critical_alerts]
+
+    if critical_alerts and should_alert(state, "supervision_critical"):
+        notify("\n".join(critical_alerts))
+        state.setdefault("last_alert", {})["supervision_critical"] = now.isoformat()
+
+    # non-criticalは1時間に1回まで
+    if noncritical_alerts:
+        nc_last = state.get("last_alert", {}).get("supervision_noncritical")
+        nc_elapsed = 999
+        if nc_last:
+            try:
+                nc_elapsed = (now - datetime.fromisoformat(nc_last)).total_seconds() / 60
+            except (ValueError, TypeError):
+                pass
+        if nc_elapsed >= 60:  # 1時間クールダウン
+            notify("\n".join(noncritical_alerts))
+            state.setdefault("last_alert", {})["supervision_noncritical"] = now.isoformat()
 
     # 全員健康な場合は記録のみ
     state["last_run"] = now.isoformat()

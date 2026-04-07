@@ -266,6 +266,13 @@ async def main(
     dry_run: bool = False,
 ) -> int:
     """メイン処理. 戻り値は蓄積されたエントリ数."""
+    # ハートビート送信
+    try:
+        from supervisor import write_heartbeat
+        write_heartbeat("x_monitor")
+    except ImportError:
+        pass
+
     keywords = keywords or DEFAULT_KEYWORDS
 
     client = OllamaClient(timeout=300.0)
