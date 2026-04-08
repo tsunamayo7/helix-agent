@@ -5,8 +5,8 @@
 English README: **[README.md](README.md)**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-330%20passing-brightgreen.svg)](#)
-[![v0.14.0](https://img.shields.io/badge/version-0.14.0-7c3aed.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-347%20passing-brightgreen.svg)](#)
+[![v0.15.1](https://img.shields.io/badge/version-0.15.1-7c3aed.svg)](#)
 [![8GB VRAM OK](https://img.shields.io/badge/GPU-8GB%20VRAM%20OK-green.svg)](#gpu-自動検出とモデルティア)
 
 ## トークン削減 — 実測データ
@@ -201,6 +201,38 @@ uv run helix-agent-ja-input
 3. Claude Code ターミナルで `Ctrl+V`
 
 tkinter（標準ライブラリ）のみで実装されており、追加依存ゼロ・軽量です。macOS の [Prompt Line](https://qiita.com/nkmr_jp/items/c0dd480d320fc333e60a) の Windows 向け代替として作りました。
+
+## 並列タスク実行 (v0.15.1, NEW)
+
+複数タスクを同時実行し、タスク種別×入力サイズで最適モデルを自動選択:
+
+```python
+parallel_tasks(tasks='[
+    {"task": "このコードを要約", "type": "summarize", "context": "..."},
+    {"task": "英語に翻訳: ...", "type": "translate"},
+    {"task": "分類して", "type": "classify"},
+    {"task": "ベストプラクティスを検索", "type": "search"},
+    {"task": "セキュリティレビュー", "type": "review", "context": "..."}
+]')
+```
+
+**2軸自動モデル選択** — タスク種別 × 入力複雑度:
+
+| 入力サイズ | 要約/翻訳/分類 | 検索/コード生成 | レビュー |
+|---|---|---|---|
+| 短い (<3K字) | gemma4:e2b (**3-6秒**) | gemma4:e4b (26秒) | gemma4:31b |
+| 中程度 (3-8K字) | gemma4:e4b (12秒) | gemma4:31b | gemma4:31b |
+| 長い (>8K字) | gemma4:31b (21秒) | gemma4:31b | gemma4:31b |
+
+ベンチマーク (5タスク同時実行, clip-bridge 501行):
+
+| 構成 | 時間 | VRAM | 品質 |
+|---|---|---|---|
+| **e2b+e4b混合並列** | **51秒** | **10GB** | 5タスク全成功 |
+| e4b×3専門家並列 | 85秒 | 6GB | P1=2件検出 |
+| 31b単独 | 130秒 | 20GB | P1=2, P2=1, P3=2 |
+
+軽量タスク(e2b/e4b)は`asyncio.gather`で並列実行。重いタスク(31b)はGPU競合防止のため順次実行。
 
 ## クイックスタート
 

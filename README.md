@@ -242,11 +242,43 @@ Dedicated vision model for **95%+ OCR accuracy** on Japanese text:
 
 Auto-selected for 48GB+ GPUs. Role separation: gemma4 = code/reasoning/RAG, Qwen3-VL = vision/OCR.
 
+### Parallel Task Execution (v0.15.1, NEW)
+
+Run multiple tasks simultaneously with automatic model routing:
+
+```python
+parallel_tasks(tasks='[
+    {"task": "Summarize this code", "type": "summarize", "context": "..."},
+    {"task": "Translate to English: ...", "type": "translate"},
+    {"task": "Classify these items", "type": "classify"},
+    {"task": "Search for best practices", "type": "search"},
+    {"task": "Security review", "type": "review", "context": "...code..."}
+]')
+```
+
+**2-axis automatic model selection** — task type × input complexity:
+
+| Input size | summarize/translate/classify | search/code_gen | review |
+|---|---|---|---|
+| Short (<3K chars) | gemma4:e2b (**3-6s**) | gemma4:e4b (26s) | gemma4:31b |
+| Medium (3-8K) | gemma4:e4b (12s) | gemma4:31b | gemma4:31b |
+| Long (>8K) | gemma4:31b (21s) | gemma4:31b | gemma4:31b |
+
+Benchmark (5 tasks simultaneous, clip-bridge 501 lines):
+
+| Config | Time | VRAM | Quality |
+|---|---|---|---|
+| **e2b+e4b mixed parallel** | **51s** | **10GB** | All 5 tasks OK |
+| e4b×3 specialist parallel | 85s | 6GB | P1=2 detected |
+| 31b single | 130s | 20GB | P1=2, P2=1, P3=2 |
+
+Light tasks (e2b/e4b) run in parallel via `asyncio.gather`. Heavy tasks (31b+) run sequentially to avoid GPU contention.
+
 ### Delegation & agents
 
 ReAct loop with tool access, context-inheriting sub-agents, background workers, Qdrant shared memory, JSONL tracing, PathGuard safety, OOM auto-fallback.
 
-- `think` / `agent_task` / `fork_task` — local LLM delegation
+- `think` / `agent_task` / `parallel_tasks` / `fork_task` — local LLM delegation
 - `see` / `browse` / `computer_use` — vision + browser
 - `spawn_agent` / `send_agent_input` / `wait_agent` / `list_agents` / `close_agent`
 - `search_memory` / `add_memory` — Qdrant
