@@ -438,9 +438,14 @@ class ReactLoop:
                 chunks.append(chunk)
             return "".join(chunks), 0, 0
 
+        # 小モデル(e2b/e4b)は出力トークンが不足しがちなのでnum_predictを拡張
+        num_predict = None
+        if any(tag in model for tag in ("e2b", "e4b", "e1b", ":1b", ":3b", ":4b", ":7b", ":8b")):
+            num_predict = 8192
         resp = await self.client.chat_with_usage(
             model=model, messages=messages,
             temperature=temperature, format_json=True,
+            num_predict=num_predict,
         )
         return resp.content, resp.input_tokens, resp.output_tokens
 

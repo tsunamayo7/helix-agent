@@ -126,6 +126,108 @@ async def agent_task(
 
 
 @mcp.tool()
+async def parallel_tasks(
+    tasks: str,
+    provider: str = "ollama",
+    max_steps: int = 10,
+    timeout: int = 180,
+) -> dict:
+    """Run multiple tasks in parallel on local LLMs. Auto-selects optimal model per task.
+
+    Tasks using e2b/e4b run truly in parallel. Tasks requiring 31b run sequentially
+    (31b parallel degrades quality due to GPU contention).
+
+    Args:
+        tasks: JSON array of task objects, each with:
+               - "task": what to do (required)
+               - "type": task type for model selection (optional, default "text")
+                         One of: summarize, translate, classify, code_gen, search, review, text
+               - "context": additional context (optional)
+        provider: LLM provider (default "ollama")
+        max_steps: Max ReAct steps per task
+        timeout: Timeout per task in seconds
+
+    Example:
+        parallel_tasks(tasks='[
+            {"task": "Summarize this code", "type": "summarize", "context": "...code..."},
+            {"task": "Translate to English: ...", "type": "translate"},
+            {"task": "Classify these items", "type": "classify"}
+        ]')
+    """
+    import asyncio as _asyncio
+    import json as _json
+    from src.gpu_detect import auto_select_model
+
+    try:
+        task_list = _json.loads(tasks)
+    except _json.JSONDecodeError:
+        return {"error": "tasks must be a valid JSON array"}
+
+    if not isinstance(task_list, list) or len(task_list) == 0:
+        return {"error": "tasks must be a non-empty JSON array"}
+
+    # Separate tasks by model weight: light (e2b/e4b) vs heavy (31b+)
+    light_tasks = []
+    heavy_tasks = []
+    for i, t in enumerate(task_list):
+        task_type = t.get("type", "text")
+        input_len = len(t.get("task", "")) + len(t.get("context", ""))
+        model = auto_select_model(task_type, input_len=input_len)
+        entry = {"index": i, "model": model, **t}
+        if "31b" in model or "72b" in model or "122b" in model:
+            heavy_tasks.append(entry)
+        else:
+            light_tasks.append(entry)
+
+    results = [None] * len(task_list)
+
+    # Light tasks: run in parallel
+    async def run_one(entry):
+        r = await runtime.agent(
+            task=entry["task"],
+            context=entry.get("context", ""),
+            model=entry["model"],
+            provider=provider,
+            max_steps=max_steps,
+            timeout=timeout,
+        )
+        return entry["index"], r
+
+    if light_tasks:
+        light_results = await _asyncio.gather(
+            *[run_one(e) for e in light_tasks],
+            return_exceptions=True,
+        )
+        for item in light_results:
+            if isinstance(item, Exception):
+                continue
+            idx, r = item
+            results[idx] = r
+
+    # Heavy tasks: run sequentially (31b parallel degrades quality)
+    for entry in heavy_tasks:
+        try:
+            r = await runtime.agent(
+                task=entry["task"],
+                context=entry.get("context", ""),
+                model=entry["model"],
+                provider=provider,
+                max_steps=max_steps,
+                timeout=timeout,
+            )
+            results[entry["index"]] = r
+        except Exception as e:
+            results[entry["index"]] = {"error": str(e)}
+
+    return {
+        "results": results,
+        "parallel_count": len(light_tasks),
+        "sequential_count": len(heavy_tasks),
+        "models_used": list({e["model"] for e in light_tasks + heavy_tasks}),
+    }
+
+
+@mcp.tool()
 async def see(
     image_path: str,
     question: str = "Describe what you see in this image in detail.",
@@ -612,7 +714,7 @@ async def code_review(
     """
     from src.code_review import CodeReviewPipeline
 
-    pipeline = CodeReviewPipeline(helix)
+    pipeline = CodeReviewPipeline(runtime)
     result = await pipeline.run(
         target=target,
         context=context,

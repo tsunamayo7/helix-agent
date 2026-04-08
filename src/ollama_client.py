@@ -70,6 +70,7 @@ class OllamaClient:
         temperature: float = 0.7,
         format_json: bool = False,
         num_ctx: int | None = None,
+        num_predict: int | None = None,
     ) -> ChatResponse:
         payload: dict = {
             "model": model,
@@ -81,6 +82,8 @@ class OllamaClient:
             payload["format"] = "json"
         if num_ctx:
             payload["options"]["num_ctx"] = num_ctx
+        if num_predict:
+            payload["options"]["num_predict"] = num_predict
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             r = await client.post(f"{self.host}/api/chat", json=payload)

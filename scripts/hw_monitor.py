@@ -91,7 +91,7 @@ def get_cpu_info() -> dict:
     return info
 
 
-def check_alerts(gpus: list[dict], cpu_temp: float | None) -> list[dict]:
+def check_alerts(gpus: list[dict], cpu_info: dict | None) -> list[dict]:
     """閾値チェックしてアラートを生成."""
     alerts = []
     t = ALERT_THRESHOLDS
@@ -254,9 +254,9 @@ if __name__ == "__main__":
         print(f"監視開始 (間隔: {interval}秒)")
         while True:
             gpus = get_gpu_status()
-            cpu_temp = get_cpu_temp()
-            alerts = check_alerts(gpus, cpu_temp)
-            save_status(gpus, cpu_temp, alerts)
+            cpu_info = get_cpu_info()
+            alerts = check_alerts(gpus, cpu_info)
+            save_status(gpus, cpu_info, alerts)
             status = get_latest_status()
             if status:
                 print(format_status(status))

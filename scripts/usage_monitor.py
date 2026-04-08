@@ -309,6 +309,16 @@ def run_check() -> dict:
 
     # ブラウザ使用率取得（CDP接続可能な場合のみ）
     browser_usage = get_usage_from_browser()
+    # 鮮度チェック: 1時間以上古いデータは無視
+    if browser_usage:
+        try:
+            data_ts = datetime.fromisoformat(browser_usage.get("timestamp", ""))
+            age_hours = (now - data_ts).total_seconds() / 3600
+            if age_hours > 1.0:
+                browser_usage["stale"] = True
+                browser_usage["age_hours"] = round(age_hours, 1)
+        except (ValueError, TypeError):
+            pass
     if browser_usage:
         result["browser_usage"] = browser_usage
         # ブラウザ使用率ベースのアラート
