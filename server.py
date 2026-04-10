@@ -740,14 +740,14 @@ async def code_review(
     web_search: bool = True,
     generate_patch: bool = False,
     skip_sonnet: bool = False,
-    codex_consult: bool = False,
+    codex_consult: bool = True,
     codex_effort: str = "",
     max_files: int = 20,
 ) -> dict:
-    """3-Layer Code Review Pipeline: gemma4($0) + Sonnet verification.
+    """4-Layer Code Review Pipeline: gemma4($0) + Sonnet + Opus + Codex (Second Lead).
 
     Reviews code using local LLM (gemma4) with RAG/web_search,
-    then optionally verifies with Sonnet and consults Codex for complex bugs.
+    verifies with Sonnet, and consults Codex (Second Lead, default ON) for P1 issues.
 
     Args:
         target: File or directory path to review
@@ -756,9 +756,11 @@ async def code_review(
         web_search: Enable web_search for latest best practices
         generate_patch: Generate unified diff fix patches
         skip_sonnet: Skip Sonnet verification (gemma4 only, fastest)
-        codex_consult: Consult Codex as expert for P1 issues
+        codex_consult: Consult Codex as Second Lead when P1 issues are found.
+                       Default True (2026-04-11〜, Codex Pro plan).
+                       Set False for token-saving $0 gemma4-only review.
         codex_effort: Codex reasoning effort (none/minimal/low/medium/high/xhigh).
-                      Empty → default high. Auto-escalate to xhigh if P1>=3.
+                      Empty → default high. Auto-escalate to xhigh if P1>=1.
         max_files: Maximum files to review (default 20)
     """
     from src.code_review import CodeReviewPipeline

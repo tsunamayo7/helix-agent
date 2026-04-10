@@ -30,8 +30,9 @@ class AgentConfig:
     codex_sandbox: str = "workspace-write"
     codex_timeout: int = 180
     # reasoning effort: none, minimal, low, medium, high, xhigh
-    # P1問題やデバッグ: high (デフォルト)
-    # 重大な設計判断や複雑なバグ: xhigh
+    # 通常のデバッグ・レビュー: high (デフォルト)
+    # P1問題や重大な設計判断・複雑なバグ: xhigh
+    # code_review() では P1≥1 で自動 xhigh エスカレート (Codex Pro, 2026-04-11〜)
     codex_effort: str = "high"
 
     openai_base_url: str = "https://api.openai.com/v1"

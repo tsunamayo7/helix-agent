@@ -229,7 +229,7 @@ class CodeReviewPipeline:
         max_steps: int = 15,
         timeout: int = 300,
         skip_sonnet: bool = False,
-        codex_consult: bool = False,
+        codex_consult: bool = True,
         codex_effort: str = "",
     ) -> ReviewResult:
         """
@@ -246,7 +246,11 @@ class CodeReviewPipeline:
             max_steps: ReAct loop max steps for gemma4.
             timeout: Total timeout in seconds.
             skip_sonnet: Skip Layer 3 (gemma4 only, fastest).
-            codex_consult: Call Codex as a consultant for difficult issues.
+            codex_consult: Call Codex as a consultant when P1 issues are found.
+                           Default True (2026-04-11〜, Codex Pro Second Lead role).
+                           Set False for token-saving $0 gemma4-only review.
+            codex_effort: Reasoning effort override. Empty → auto
+                          (xhigh when P1≥1, per Codex Pro plan).
 
         Returns:
             ReviewResult with all findings.
@@ -447,19 +451,20 @@ class CodeReviewPipeline:
         context: str,
         effort: str = "",
     ) -> str:
-        """Consult Codex as an expert for difficult P1 issues.
+        """Consult Codex as the Second Lead for P1 issues.
 
         Args:
             effort: Codex reasoning effort. Empty → config default ("high").
-                    P1問題が3件以上ある場合は自動で "xhigh" にエスカレート。
+                    P1問題が1件でもあれば自動で "xhigh" にエスカレート
+                    (Codex Pro $100 プラン、2026-04-11〜)。
         """
         p1_issues = [i for i in issues if i.severity == "P1"]
         issues_summary = "\n".join(
             f"- [{i.source}] {i.file}:{i.line} {i.title}" for i in p1_issues
         )
 
-        # 自動エスカレーション: P1が3件以上 → xhigh
-        if not effort and len(p1_issues) >= 3:
+        # 自動エスカレーション: P1が1件以上 → xhigh (Codex Pro プラン対応)
+        if not effort and len(p1_issues) >= 1:
             effort = "xhigh"
             logger.info("Codex: escalating to xhigh (P1 count=%d)", len(p1_issues))
 
