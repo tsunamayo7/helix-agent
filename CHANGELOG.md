@@ -2,6 +2,53 @@
 
 All notable changes to helix-agent are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.15.1] - 2026-04-08
+
+### Added
+- **`parallel_tasks` MCP tool** — execute multiple tasks simultaneously with automatic model routing
+- **2-axis automatic model selection** — task type × input complexity → optimal Gemma 4 variant (e2b / e4b / 26b / 31b)
+- `asyncio.gather`-based parallel execution for light tasks (e2b/e4b), sequential for heavy tasks (31b+) to avoid GPU contention
+- Benchmark: 5 parallel tasks on 501-line input — e2b+e4b mixed **51 s / 10 GB VRAM** (vs 31b single 130 s / 20 GB)
+
+### Changed
+- README.md / README.ja.md: added parallel_tasks section with benchmarks and 2-axis model selection matrix
+
+## [0.15.0] - 2026-04-07
+
+### Added
+- **4-Layer Code Review Pipeline** (`code_review` MCP tool):
+  - Layer 2: gemma4 ReAct review with `web_search` + RAG ($0)
+  - Layer 3: Sonnet 4.6 verification + cross-file analysis (~¥10)
+  - Layer 4: Opus 4.6 meta-review — summary-only, no source code (~¥5)
+  - Codex consultant for P1 issues (on-demand)
+  - Empirical: gemma4+RAG ($0) outperforms Codex GPT-5.3 (~¥50) in finding uniqueness
+  - `skip_sonnet=True` for daily $0 reviews, `codex_consult=True` for release gates
+- **Codex reasoning effort control** (`src/provider_runtime.py`):
+  - `VALID_CODEX_EFFORTS = {"none","minimal","low","medium","high","xhigh"}`
+  - `codex_effort` parameter on `code_review`, `think(provider="codex")`, `agent_task(provider="codex")`
+  - Default: `high`
+  - **Auto-escalation**: when the 4-layer pipeline detects ≥3 P1 issues, Codex is invoked with `xhigh` automatically (`_consult_codex`)
+- **gemma4 ReAct context expansion** — gemma4 now operates as a 12-tool ReAct agent with `web_search` (Qdrant RAG + SearXNG), filtered `search_memory`, 9-category `add_memory`, and 5-rule injection defense
+- **Qwen3-VL 32B Vision/OCR** — dedicated vision model auto-selected on 48 GB+ GPUs, 95%+ OCR accuracy on Japanese text (phone numbers, postal codes, handwritten forms)
+- **Department RAG (dept_*)** — per-department Qdrant collections `dept_hr`/`dept_research`/`dept_design`/`dept_build`/`dept_qa` + `mem0_shared`, exposed via `dept_search` / `dept_store` MCP tools
+- **Autonomous operations harness** (`scripts/`):
+  - `system_auditor.py` — periodic integrity and drift audit across memory, hooks, services
+  - `anomaly_dispatcher.py` — routes detected anomalies to the right department / agent
+  - `env_self_heal.py` — auto-repairs common environment regressions (services, paths, dependencies)
+  - `critical_files_guard.py` — SHA-256 snapshot protection for `CLAUDE.md`, `settings.json`, etc. (30 generations)
+  - `helix_overview.py` — single-command 9-domain overview for the operator or Claude itself
+  - `dept_feed_bridge.py` / `dept_dataset_builder.py` / `dept_ft_advisor.py` — department RAG growth → dataset → LoRA fine-tuning pipeline
+  - `supervisor.py` — watches 9 resident daemons, auto-restart on failure
+  - Audit → dispatch → heal chain under Windows Task Scheduler
+
+### Changed
+- Total MCP tool count: **23 → 27** (added `parallel_tasks`, `dept_search`, `dept_store`, `code_review`)
+- Test suite: **312 → 347 passing**
+- README.md / README.ja.md: added 4-Layer Code Review section, Codex effort documentation, autonomous operations section, MCP tool category list
+
+### Fixed
+- P1 bugs surfaced via 4-layer review pipeline (cross-file analysis)
+
 ## [0.14.0] - 2026-04-06
 
 ### Added

@@ -8,7 +8,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-10b981.svg)](https://modelcontextprotocol.io)
 [![Tests](https://img.shields.io/badge/tests-347%20passing-brightgreen.svg)](#)
-[![v0.15.0](https://img.shields.io/badge/version-0.15.0-7c3aed.svg)](#)
+[![v0.15.1](https://img.shields.io/badge/version-0.15.1-7c3aed.svg)](#)
 [![MCP 3-Primitive](https://img.shields.io/badge/MCP-Tools%20%2B%20Resources%20%2B%20Prompts-10b981.svg)](#)
 [![Works on 8GB VRAM](https://img.shields.io/badge/GPU-8GB%20VRAM%20OK-green.svg)](#gpu-auto-detection--model-tiers)
 
@@ -68,7 +68,7 @@ After 22 turns (average session), that's **~1M+ tokens** — most of it overhead
 | GPU auto-detect → model selection | ✅ 8GB to 96GB+ tiers | ❌ Other tools require manual config |
 | Self-evolving memory | ✅ hermes-style SKILL.md + Qdrant | ❌ Unique to helix-agent |
 | Browser 82–93% token reduction | ✅ agent-browser + fallback chain | △ agent-browser alone (no fallback) |
-| All 3 MCP primitives | ✅ 23 Tools + 3 Resources + 3 Prompts | △ Most MCPs only implement Tools |
+| All 3 MCP primitives | ✅ 27 Tools + 3 Resources + 3 Prompts | △ Most MCPs only implement Tools |
 
 ## Why retry_guard?
 
@@ -220,7 +220,16 @@ code_review(target="src/", context="payment module")
 
 # P1 emergency (+ Codex consultant)
 code_review(target="src/", codex_consult=True)
+
+# Control Codex reasoning depth explicitly
+code_review(target="src/", codex_consult=True, codex_effort="xhigh")
 ```
+
+**Codex reasoning effort control** (v0.15.0):
+
+- `codex_effort="none|minimal|low|medium|high|xhigh"` — overrides Codex reasoning depth
+- Default (empty) → `high`
+- **Auto-escalation**: when the pipeline detects ≥3 P1 issues, Codex is invoked with `xhigh` automatically (no manual tuning needed)
 
 ### gemma4 Context Expansion (v0.15.0, NEW)
 
@@ -274,15 +283,34 @@ Benchmark (5 tasks simultaneous, clip-bridge 501 lines):
 
 Light tasks (e2b/e4b) run in parallel via `asyncio.gather`. Heavy tasks (31b+) run sequentially to avoid GPU contention.
 
+### Autonomous operations & growth loop (v0.15.0, NEW)
+
+helix-agent ships a scripts-layer automation harness that keeps the agent itself healthy. The **audit → dispatch → heal** chain runs under Windows Task Scheduler so Claude Code stays on a self-healing substrate.
+
+| Script | Purpose |
+|---|---|
+| `scripts/system_auditor.py` | Periodic integrity & drift audit across memory, hooks, services |
+| `scripts/anomaly_dispatcher.py` | Routes detected anomalies to the right department / agent |
+| `scripts/env_self_heal.py` | Auto-repairs common environment regressions (services, paths, deps) |
+| `scripts/critical_files_guard.py` | Protects `CLAUDE.md`, `settings.json`, core configs from accidental loss (SHA-256 snapshots, 30 generations) |
+| `scripts/helix_overview.py` | Single-command 9-domain overview (corp / memory / RAG growth / anomalies / config / startup / projects / security / maintenance) |
+| `scripts/dept_feed_bridge.py` | Feeds per-department Qdrant RAGs (dept_hr/research/design/build/qa) from live signals |
+| `scripts/dept_dataset_builder.py` | Builds instruction-tuning datasets from department RAG growth |
+| `scripts/dept_ft_advisor.py` | Advises when a department is ready for LoRA fine-tuning |
+| `scripts/supervisor.py` | Watches 9 resident daemons and restarts as needed |
+
 ### Delegation & agents
 
 ReAct loop with tool access, context-inheriting sub-agents, background workers, Qdrant shared memory, JSONL tracing, PathGuard safety, OOM auto-fallback.
 
 - `think` / `agent_task` / `parallel_tasks` / `fork_task` — local LLM delegation
-- `see` / `browse` / `computer_use` — vision + browser
-- `spawn_agent` / `send_agent_input` / `wait_agent` / `list_agents` / `close_agent`
-- `search_memory` / `add_memory` — Qdrant
-- `providers` / `models` / `config` / `agent_types`
+- `see` / `browse` / `computer_use` / `vision_compress` / `dom_compress` — vision + browser
+- `spawn_agent` / `send_agent_input` / `wait_agent` / `list_agents` / `close_agent` — background workers
+- `dept_search` / `dept_store` — per-department Qdrant (dept_hr/research/design/build/qa, mem0_shared)
+- `evolving_memory_review` / `list_learned_skills` / `get_skill` — self-evolving memory
+- `retry_guard_check` / `retry_guard_status` / `retry_guard_reset` — loop detection
+- `code_review` — 4-layer review pipeline
+- `providers` / `models` / `config` / `agent_types` — meta
 
 ## Quick Start
 
@@ -353,7 +381,7 @@ helix-agent implements all three MCP primitives as defined by [Anthropic Academy
 
 | Primitive | Control | Count | Examples |
 |-----------|---------|-------|----------|
-| **Tools** | Model-controlled (Claude decides) | 24 | `retry_guard_check`, `think`, `computer_use`, `vision_compress`, `code_review`, `web_search` |
+| **Tools** | Model-controlled (Claude decides) | 27 | `retry_guard_check`, `think`, `computer_use`, `vision_compress`, `code_review`, `parallel_tasks`, `dept_search` |
 | **Resources** | App-controlled (read-only data) | 3 | `helix://status`, `helix://models`, `helix://config` |
 | **Prompts** | User-controlled (workflows) | 3 | `retry_report`, `optimize_tokens`, `setup_guide` |
 
@@ -370,7 +398,7 @@ Claude Code (Opus 4.6 — decides what to do)
   │   ├─ optimize_tokens      → token saving recommendations
   │   └─ setup_guide          → first-run setup walkthrough (Japanese)
   │
-  ├─ Tools (24 total)
+  ├─ Tools (27 total)
   │   ├─ retry_guard_check    → is this tool call looping? (pure logic, no LLM)
   │   ├─ vision_compress      → gemma4 vision → ~400-token summary
   │   ├─ dom_compress         → gemma4 text → ~500-token structured extract

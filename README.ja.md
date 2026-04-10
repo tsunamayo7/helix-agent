@@ -84,7 +84,7 @@ ollama pull gemma4:31b   # 48GB+ GPU
 | GPU自動検出→モデル選択 | ✅ 8GB〜96GB+の5ティア | ❌ 他ツールは手動設定が必要 |
 | 自己進化記憶 | ✅ hermes方式SKILL.md + Qdrant | ❌ helix-agent独自機能 |
 | ブラウザ82〜93%トークン削減 | ✅ agent-browser + フォールバック | △ agent-browser単体（フォールバックなし） |
-| MCP 3プリミティブ完全対応 | ✅ 23 Tools + 3 Resources + 3 Prompts | △ ほとんどのMCPはToolsのみ |
+| MCP 3プリミティブ完全対応 | ✅ 27 Tools + 3 Resources + 3 Prompts | △ ほとんどのMCPはToolsのみ |
 
 ## 主要機能
 
@@ -186,7 +186,7 @@ list_learned_skills()
 # → {"skills": [...], "stats": {"turns": 50, "skills_count": 3}}
 ```
 
-### 5. Windows の日本語入力問題を解決（`helix-agent-ja-input`）
+### 6. Windows の日本語入力問題を解決（`helix-agent-ja-input`）
 
 Claude Code は React Ink で TUI を構築しているため、IME との相性が悪く、**文字重複・カーソルずれ・変換中 Enter で暴発** といった問題が頻発します（[Zenn で完全解説](https://zenn.dev/atu4403/articles/claudecode-japanese-input-solution)）。
 
@@ -201,6 +201,67 @@ uv run helix-agent-ja-input
 3. Claude Code ターミナルで `Ctrl+V`
 
 tkinter（標準ライブラリ）のみで実装されており、追加依存ゼロ・軽量です。macOS の [Prompt Line](https://qiita.com/nkmr_jp/items/c0dd480d320fc333e60a) の Windows 向け代替として作りました。
+
+## 4層コードレビューパイプライン（v0.15.0, NEW）
+
+複数LLMを連携させ、約¥30でコードレビュー網羅率ほぼ100%を目指す実装です:
+
+```
+Layer 2: gemma4 ReActレビュー（$0, web_search + RAG 付き）
+  ↓ findings + context
+Layer 3: Sonnet 4.6 検証 + クロスファイル解析（~¥10）
+  ↓ マージされた findings
+Layer 4: Opus 4.6 メタレビュー（~¥5, サマリのみ読む — 原文は読まない）
+  ↓ 最終裁定
+Codex:   コンサルタント（P1問題のみ、オンデマンド）
+```
+
+**実測比較（同一コードベース 5モデル比較）**:
+
+| レビュアー | 検出件数 | 独自検出 | コスト |
+|---|:---:|:---:|:---:|
+| gemma4+RAG（ローカル） | 7 | 1 | **$0** |
+| Codex GPT-5.3 | 5 | 0 | ~¥50 |
+| Sonnet 4.6 | 14 | 1 | ~¥20 |
+| Opus 4.6 | 16 | 4 | ~¥100 |
+| **4層統合** | **16+** | **全部** | **~¥30** |
+
+> **ポイント**: gemma4 + RAG（$0）が Codex GPT-5.3（~¥50）をコードレビュー品質で上回ります。
+
+```python
+# 日常レビュー（gemma4のみ、$0）
+code_review(target="src/", skip_sonnet=True)
+
+# リリース前（gemma4 + Sonnet、~¥10）
+code_review(target="src/", context="決済モジュール")
+
+# P1緊急（+ Codexコンサル）
+code_review(target="src/", codex_consult=True)
+
+# Codex reasoning effort を明示（none/minimal/low/medium/high/xhigh）
+code_review(target="src/", codex_consult=True, codex_effort="xhigh")
+```
+
+**codex_effort 仕様**:
+
+- 省略時は `high` がデフォルト
+- **自動昇格**: P1 問題が 3 件以上検出されると Codex は自動的に `xhigh` で起動されます（手動指定不要)
+
+## 自律運用・成長ループ（v0.15.0, NEW）
+
+helix-agent は `scripts/` 配下に自己保守用ハーネスを同梱しています。**監査 → 派遣 → 自動修復** の連鎖を Windows タスクスケジューラで定期実行することで、Claude Code は自己修復基盤の上で動きます。
+
+| スクリプト | 役割 |
+|---|---|
+| `scripts/system_auditor.py` | 記憶・フック・サービス・整合性の定期監査 |
+| `scripts/anomaly_dispatcher.py` | 検知した異常を適切な部門/エージェントへ派遣 |
+| `scripts/env_self_heal.py` | 環境リグレッション（サービス/依存/パス）の自動修復 |
+| `scripts/critical_files_guard.py` | `CLAUDE.md`/`settings.json` 等の重要ファイル保護（SHA-256スナップショット、30世代） |
+| `scripts/helix_overview.py` | Claude 自身が 1 コマンドで 9 領域（会社/記憶/RAG/異常/設定/起動/生成物/セキュリティ/保守）を俯瞰 |
+| `scripts/dept_feed_bridge.py` | 部門別 Qdrant RAG（dept_hr/research/design/build/qa）へのライブ給餌 |
+| `scripts/dept_dataset_builder.py` | 部門 RAG からファインチューニング用データセットを生成 |
+| `scripts/dept_ft_advisor.py` | 部門の FT 準備度を評価・推奨 |
+| `scripts/supervisor.py` | 常駐デーモン 9 本の監視・再起動 |
 
 ## 並列タスク実行 (v0.15.1, NEW)
 
@@ -233,6 +294,18 @@ parallel_tasks(tasks='[
 | 31b単独 | 130秒 | 20GB | P1=2, P2=1, P3=2 |
 
 軽量タスク(e2b/e4b)は`asyncio.gather`で並列実行。重いタスク(31b)はGPU競合防止のため順次実行。
+
+## MCPツール一覧
+
+合計 **27 MCPツール** + 3 Resources + 3 Prompts（v0.15.0時点、`server.py`）。主要カテゴリ別:
+
+- **委譲**: `think` / `agent_task` / `parallel_tasks` / `fork_task`
+- **ビジョン/ブラウザ**: `see` / `browse` / `computer_use` / `vision_compress` / `dom_compress`
+- **トークン防衛**: `retry_guard_check` / `retry_guard_status` / `retry_guard_reset`
+- **記憶**: `dept_search` / `dept_store`（部門別 Qdrant: dept_hr/research/design/build/qa、mem0_shared）/ `evolving_memory_review` / `list_learned_skills` / `get_skill`
+- **バックグラウンド**: `spawn_agent` / `send_agent_input` / `wait_agent` / `list_agents` / `close_agent`
+- **品質**: `code_review`（4層レビューパイプライン、`codex_effort` 指定可）
+- **メタ**: `providers` / `models` / `config` / `agent_types`
 
 ## クイックスタート
 
