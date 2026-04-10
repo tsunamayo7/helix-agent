@@ -1,19 +1,34 @@
-"""Auto-detect GPU VRAM and select optimal model for each task.
+"""Flexible GPU-aware model selection with Opus-driven routing.
 
-Enables helix-agent to work on any GPU from 4GB to 96GB VRAM,
-automatically choosing the best model for the available hardware.
+Design philosophy:
+  - Opus (the caller) can specify model/strategy hints for intelligent routing
+  - helix-agent auto-selects when no hint is given, considering:
+    * Task type, input complexity, urgency, quality requirements
+    * Available VRAM and current GPU load
+    * Model capabilities (v4 for ReAct/review, 31b for exploration, e2b/e4b for light tasks)
+  - Fixed lookup tables are fallback only; the caller's intent takes priority
 
-Benchmark results (RTX PRO 6000):
-  gemma4:e2b  (~4GB VRAM): DOM 9.6s, Review 3.2s — fast, good enough
-  gemma4:e4b  (~6GB VRAM): DOM 11.4s, Review 4.4s — sweet spot
-  gemma4:31b (~20GB VRAM): DOM 11.9s, Review 6.1s — most accurate
+Model roster (2026-04-08):
+  gemma4:e2b       (~4GB)  — Fastest, light tasks (summarize/translate/classify)
+  gemma4:e4b       (~6GB)  — Balanced, medium tasks (code_gen, moderate review)
+  gemma4-agent-coder-v4 (~20GB) — Custom fine-tuned: ReAct, tool use, critique, structured output
+  gemma4:31b      (~20GB)  — Base model: best for unknown/novel problem discovery
+  qwen3-vl:32b   (~20GB)  — Vision specialist (OCR, image analysis)
+  qwen3.5:72b    (~45GB)  — High-quality reasoning
+  qwen3.5:122b   (~75GB)  — Maximum reasoning power
+
+v4 vs 31b (benchmark 2026-04-08):
+  v4: ReAct 6.6s(OK), Review 39s(P1=2), Critique OK, Tool select 3/3, Free-form OK
+  31b: ReAct 19.2s(OK), Review 54s(P1=2), Critique OK, Tool select 3/3
+  → v4 is 1.3-3x faster with equal precision. Use v4 as default, 31b for exploration.
 """
 
 from __future__ import annotations
 
 import subprocess
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -23,75 +38,118 @@ class GPUInfo:
     vram_gb: float = 0.0
 
 
-# Model recommendations by VRAM tier
-# Benchmark results (2026-04-08, clip-bridge 501 lines):
-#   review:    31b=5件(130s) >> e2b=1件(46s) > e4b=0件(35s)
-#   summarize: e2b=4s(OK) << e4b=12s(best) << 31b=21s(OK)
-#   translate: e2b=3s(OK) ≈ e4b=15s(OK) ≈ 31b=12s(OK)
-#   code_gen:  e4b=50s(OK) >> e2b/31b(fail)
-#   classify:  e2b=6s(OK) ≈ e4b=13s(OK) ≈ 31b=23s(OK)
-#   search:    e4b=25s(best) > e2b=18s(OK) > 31b=80s(short)
+@dataclass
+class ModelSelection:
+    """Result of model selection with reasoning."""
+    model: str
+    reason: str
+    strategy: str = "auto"  # auto, fast, quality, dialogue, caller_specified
+
+
+# --- Strategy definitions ---
+# Each strategy is a prioritized model preference for different contexts.
+# Opus can request a strategy by name, or specify a model directly.
+
+STRATEGIES = {
+    "fast": {
+        "description": "Minimize latency. Use smallest capable model.",
+        "prefer": ["gemma4:e2b", "gemma4:e4b", "gemma4-agent-coder-v4:latest"],
+    },
+    "balanced": {
+        "description": "Default. v4 for most tasks, e2b/e4b for simple ones.",
+        "prefer": ["gemma4-agent-coder-v4:latest", "gemma4:e4b", "gemma4:e2b"],
+    },
+    "quality": {
+        "description": "Maximum single-model quality. Use 31b or larger.",
+        "prefer": ["gemma4:31b", "qwen3.5:72b", "gemma4-agent-coder-v4:latest"],
+    },
+    "dialogue": {
+        "description": "31b↔v4 adversarial dialogue for highest review quality.",
+        "prefer": ["gemma4:31b", "gemma4-agent-coder-v4:latest"],
+    },
+    "exploration": {
+        "description": "Unknown problem discovery. 31b's generalization is key.",
+        "prefer": ["gemma4:31b", "qwen3.5:122b"],
+    },
+    "vision": {
+        "description": "Image/screenshot analysis.",
+        "prefer": ["qwen3-vl:32b", "gemma4:e4b"],
+    },
+}
+
+# Task → capability mapping: which models can handle which tasks well
+MODEL_CAPABILITIES = {
+    "gemma4:e2b": {
+        "good": ["summarize", "translate", "classify"],
+        "ok": ["search"],
+        "weak": ["review", "code_gen", "reasoning", "critique", "react"],
+        "vram_gb": 4,
+        "speed": "fastest",
+    },
+    "gemma4:e4b": {
+        "good": ["summarize", "translate", "classify", "search", "code_gen"],
+        "ok": ["review"],
+        "weak": ["reasoning", "critique", "react"],
+        "vram_gb": 6,
+        "speed": "fast",
+    },
+    "gemma4-agent-coder-v4:latest": {
+        "good": ["react", "review", "critique", "search", "code_gen", "summarize", "translate", "classify"],
+        "ok": ["reasoning"],
+        "weak": [],
+        "vram_gb": 20,
+        "speed": "fast",
+    },
+    "gemma4:31b": {
+        "good": ["review", "reasoning", "critique", "react", "search"],
+        "ok": ["summarize", "translate", "classify", "code_gen"],
+        "weak": [],
+        "vram_gb": 20,
+        "speed": "moderate",
+    },
+    "qwen3-vl:32b": {
+        "good": ["vision"],
+        "ok": ["reasoning"],
+        "weak": ["react", "critique"],
+        "vram_gb": 20,
+        "speed": "moderate",
+    },
+    "qwen3.5:72b": {
+        "good": ["reasoning", "review", "code_gen"],
+        "ok": ["summarize", "translate"],
+        "weak": [],
+        "vram_gb": 45,
+        "speed": "slow",
+    },
+    "qwen3.5:122b": {
+        "good": ["reasoning", "review", "code_gen", "critique"],
+        "ok": ["summarize", "translate"],
+        "weak": [],
+        "vram_gb": 75,
+        "speed": "slowest",
+    },
+}
+
+# Legacy fixed tiers — used only as fallback when no strategy/hint is given
 MODEL_TIERS = {
-    # (min_vram_gb, max_vram_gb): {task: model}
-    # 8GB GPU (RTX 4060, RTX 3060, etc.)
-    (0, 10): {
-        "vision": "gemma4:e2b",
-        "text": "gemma4:e2b",
-        "review": "gemma4:e2b",
-        "reasoning": "gemma4:e2b",
-        "summarize": "gemma4:e2b",
-        "translate": "gemma4:e2b",
-        "classify": "gemma4:e2b",
-        "code_gen": "gemma4:e2b",
-        "search": "gemma4:e2b",
-    },
-    # 16GB GPU (RTX 4070 Ti, RTX 5070 Ti, etc.)
+    (0, 10): {t: "gemma4:e2b" for t in ["vision","text","review","reasoning","summarize","translate","classify","code_gen","search"]},
     (10, 20): {
-        "vision": "gemma4:e4b",
-        "text": "gemma4:e4b",
-        "review": "gemma4:e4b",
-        "reasoning": "gemma4:e4b",
-        "summarize": "gemma4:e2b",
-        "translate": "gemma4:e2b",
-        "classify": "gemma4:e2b",
-        "code_gen": "gemma4:e4b",
-        "search": "gemma4:e4b",
+        "vision": "gemma4:e4b", "text": "gemma4:e4b",
+        "review": "gemma4-agent-coder-v4:latest", "reasoning": "gemma4-agent-coder-v4:latest",
+        "summarize": "gemma4:e2b", "translate": "gemma4:e2b", "classify": "gemma4:e2b",
+        "code_gen": "gemma4:e4b", "search": "gemma4-agent-coder-v4:latest",
     },
-    # 24GB GPU (RTX 4090, RTX 3090, etc.)
-    (20, 32): {
-        "vision": "gemma4:26b",
-        "text": "gemma4:26b",
-        "review": "gemma4:26b",
-        "reasoning": "gemma4:26b",
-        "summarize": "gemma4:e2b",
-        "translate": "gemma4:e2b",
-        "classify": "gemma4:e2b",
-        "code_gen": "gemma4:e4b",
-        "search": "gemma4:e4b",
+    (20, 48): {
+        "vision": "qwen3-vl:32b", "text": "gemma4-agent-coder-v4:latest",
+        "review": "gemma4-agent-coder-v4:latest", "reasoning": "gemma4:31b",
+        "summarize": "gemma4:e2b", "translate": "gemma4:e2b", "classify": "gemma4:e2b",
+        "code_gen": "gemma4-agent-coder-v4:latest", "search": "gemma4-agent-coder-v4:latest",
     },
-    # 48GB+ GPU (RTX PRO 6000, A6000, etc.)
-    (32, 64): {
-        "vision": "qwen3-vl:32b",
-        "text": "gemma4:31b",
-        "review": "gemma4:31b",
-        "reasoning": "gemma4:31b",
-        "summarize": "gemma4:e2b",
-        "translate": "gemma4:e2b",
-        "classify": "gemma4:e2b",
-        "code_gen": "gemma4:e4b",
-        "search": "gemma4:e4b",
-    },
-    # 64GB+ GPU (RTX PRO 6000 96GB, multi-GPU, etc.)
-    (64, 1000): {
-        "vision": "qwen3-vl:32b",
-        "text": "qwen3.5:72b",
-        "review": "gemma4:31b",
-        "reasoning": "qwen3.5:122b",
-        "summarize": "gemma4:e2b",
-        "translate": "gemma4:e2b",
-        "classify": "gemma4:e2b",
-        "code_gen": "gemma4:e4b",
-        "search": "gemma4:e4b",
+    (48, 1000): {
+        "vision": "qwen3-vl:32b", "text": "gemma4-agent-coder-v4:latest",
+        "review": "gemma4-agent-coder-v4:latest", "reasoning": "qwen3.5:122b",
+        "summarize": "gemma4:e2b", "translate": "gemma4:e2b", "classify": "gemma4:e2b",
+        "code_gen": "gemma4-agent-coder-v4:latest", "search": "gemma4-agent-coder-v4:latest",
     },
 }
 
@@ -110,7 +168,6 @@ def detect_gpu() -> GPUInfo:
             timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
-            # Take the GPU with most VRAM if multiple
             best = GPUInfo()
             for line in result.stdout.strip().split("\n"):
                 parts = [p.strip() for p in line.split(",")]
@@ -129,88 +186,171 @@ def detect_gpu() -> GPUInfo:
     return GPUInfo()
 
 
-def recommend_models(vram_gb: float = 0) -> dict[str, str]:
-    """Recommend optimal models based on available VRAM.
+def _get_vram_gb() -> float:
+    """Get available VRAM in GB, with caching."""
+    gpu = detect_gpu()
+    return gpu.vram_gb if gpu.vram_gb > 0 else 4.0
+
+
+def _model_fits_vram(model: str, vram_gb: float) -> bool:
+    """Check if a model fits in available VRAM."""
+    caps = MODEL_CAPABILITIES.get(model)
+    if not caps:
+        return True  # Unknown model, assume it fits
+    return caps["vram_gb"] <= vram_gb
+
+
+def _model_good_for_task(model: str, task: str) -> str:
+    """Return capability level: 'good', 'ok', 'weak', or 'unknown'."""
+    caps = MODEL_CAPABILITIES.get(model)
+    if not caps:
+        return "unknown"
+    if task in caps["good"]:
+        return "good"
+    if task in caps["ok"]:
+        return "ok"
+    if task in caps["weak"]:
+        return "weak"
+    return "ok"  # Not listed = assume ok
+
+
+def select_model(
+    task: str = "text",
+    strategy: Optional[str] = None,
+    model: Optional[str] = None,
+    input_len: int = 0,
+    urgent: bool = False,
+    quality: str = "balanced",
+    vram_gb: float = 0,
+) -> ModelSelection:
+    """Flexible model selection driven by caller intent.
+
+    Priority order:
+      1. Explicit model specified by caller (Opus) → use it directly
+      2. Strategy specified by caller → follow strategy preferences
+      3. Auto-select based on task + input_len + urgency + quality
 
     Args:
-        vram_gb: Available VRAM in GB. If 0, auto-detect.
+        task: Task type — "react", "review", "critique", "search",
+              "summarize", "translate", "classify", "code_gen",
+              "reasoning", "vision", "text"
+        strategy: Named strategy — "fast", "balanced", "quality",
+                  "dialogue", "exploration", "vision"
+        model: Explicit model name (overrides everything)
+        input_len: Input text length in characters
+        urgent: If True, prefer faster models
+        quality: "fast", "balanced", "quality" — overridden by strategy
+        vram_gb: Available VRAM. 0 = auto-detect.
 
     Returns:
-        Dict mapping task names to recommended model names.
+        ModelSelection with model name, reason, and strategy used.
     """
     if vram_gb <= 0:
-        gpu = detect_gpu()
-        vram_gb = gpu.vram_gb
+        vram_gb = _get_vram_gb()
 
-    if vram_gb <= 0:
-        # No GPU detected, use smallest models
-        vram_gb = 4
+    # 1. Explicit model from caller (Opus's direct decision)
+    if model:
+        return ModelSelection(
+            model=model,
+            reason=f"Caller specified model: {model}",
+            strategy="caller_specified",
+        )
 
+    # 2. Named strategy from caller
+    if strategy and strategy in STRATEGIES:
+        strat = STRATEGIES[strategy]
+        for candidate in strat["prefer"]:
+            if _model_fits_vram(candidate, vram_gb) and _model_good_for_task(candidate, task) != "weak":
+                return ModelSelection(
+                    model=candidate,
+                    reason=f"Strategy '{strategy}': {strat['description']}",
+                    strategy=strategy,
+                )
+
+    # 3. Auto-select: consider task, input size, urgency, quality
+    # Map quality hint to effective strategy
+    if urgent or quality == "fast":
+        effective_strategy = "fast"
+    elif quality == "quality":
+        effective_strategy = "quality"
+    else:
+        effective_strategy = "balanced"
+
+    # Special cases
+    if task == "vision":
+        effective_strategy = "vision"
+    elif task == "critique" and input_len > 3000:
+        effective_strategy = "quality"
+    elif task == "react":
+        # v4 is specifically trained for ReAct
+        return ModelSelection(
+            model="gemma4-agent-coder-v4:latest",
+            reason="v4 trained for ReAct (3x faster than 31b, equal precision)",
+            strategy="auto",
+        )
+
+    # Input complexity upgrade
+    if input_len > 8000 and effective_strategy == "balanced":
+        effective_strategy = "quality"
+
+    # Select from effective strategy
+    strat = STRATEGIES.get(effective_strategy, STRATEGIES["balanced"])
+    for candidate in strat["prefer"]:
+        if _model_fits_vram(candidate, vram_gb) and _model_good_for_task(candidate, task) != "weak":
+            return ModelSelection(
+                model=candidate,
+                reason=f"Auto ({effective_strategy}): task={task}, input={input_len}chars",
+                strategy=f"auto_{effective_strategy}",
+            )
+
+    # Fallback to legacy tier-based selection
+    return ModelSelection(
+        model=_legacy_select(task, vram_gb),
+        reason="Fallback to legacy tier selection",
+        strategy="legacy_fallback",
+    )
+
+
+def _legacy_select(task: str, vram_gb: float) -> str:
+    """Legacy fixed-tier selection as ultimate fallback."""
     for (min_gb, max_gb), models in MODEL_TIERS.items():
         if min_gb <= vram_gb < max_gb:
-            return models
-
-    # Fallback to smallest
-    return MODEL_TIERS[(0, 10)]
+            return models.get(task, models.get("text", "gemma4:e2b"))
+    return "gemma4:e2b"
 
 
-# Complexity-based model upgrade rules.
-# When input exceeds a threshold, upgrade from the tier default to a stronger model.
-# Format: {task: [(char_threshold, upgrade_model), ...]} — evaluated in order, first match wins.
-_COMPLEXITY_UPGRADES: dict[str, list[tuple[int, str]]] = {
-    "summarize":  [(8000, "gemma4:31b"), (3000, "gemma4:e4b")],
-    "translate":  [(5000, "gemma4:31b"), (2000, "gemma4:e4b")],
-    "classify":   [(10000, "gemma4:e4b")],
-    "code_gen":   [(5000, "gemma4:31b")],
-    "search":     [(3000, "gemma4:31b")],
-    "review":     [],  # already uses strongest model
-    "reasoning":  [],  # already uses strongest model
-}
-
-
+# Backward compatibility
 def auto_select_model(
     task: str = "text",
     vram_gb: float = 0,
     input_len: int = 0,
 ) -> str:
-    """Select the optimal model for a specific task, considering input complexity.
+    """Legacy API — delegates to select_model()."""
+    result = select_model(task=task, vram_gb=vram_gb, input_len=input_len)
+    return result.model
 
-    Args:
-        task: One of "vision", "text", "review", "reasoning",
-              "summarize", "translate", "classify", "code_gen", "search"
-        vram_gb: Available VRAM in GB. If 0, auto-detect.
-        input_len: Length of input text in characters. If >0, may upgrade
-                   to a stronger model for complex inputs.
 
-    Returns:
-        Model name string (e.g., "gemma4:e4b")
-    """
-    models = recommend_models(vram_gb)
-    base_model = models.get(task, models.get("text", "gemma4:e2b"))
-
-    # Upgrade based on input complexity
-    if input_len > 0 and task in _COMPLEXITY_UPGRADES:
-        for threshold, upgrade_model in _COMPLEXITY_UPGRADES[task]:
-            if input_len >= threshold:
-                return upgrade_model
-
-    return base_model
+def recommend_models(vram_gb: float = 0) -> dict[str, str]:
+    """Legacy API — return task→model mapping for a VRAM tier."""
+    if vram_gb <= 0:
+        vram_gb = _get_vram_gb()
+    for (min_gb, max_gb), models in MODEL_TIERS.items():
+        if min_gb <= vram_gb < max_gb:
+            return models
+    return MODEL_TIERS[(0, 10)]
 
 
 def gpu_summary() -> dict:
-    """Return a summary of GPU info and recommended models."""
+    """Return GPU info, capabilities, and available strategies."""
     gpu = detect_gpu()
     models = recommend_models(gpu.vram_gb)
+    available_models = {
+        name: caps for name, caps in MODEL_CAPABILITIES.items()
+        if caps["vram_gb"] <= gpu.vram_gb
+    }
     return {
-        "gpu": {
-            "name": gpu.name,
-            "vram_gb": gpu.vram_gb,
-        },
+        "gpu": {"name": gpu.name, "vram_gb": gpu.vram_gb},
         "recommended_models": models,
-        "tiers": {
-            "8GB_GPU": {k: v for (mn, mx), v in MODEL_TIERS.items() if mn == 0 for k, v in v.items()},
-            "16GB_GPU": {k: v for (mn, mx), v in MODEL_TIERS.items() if mn == 10 for k, v in v.items()},
-            "24GB_GPU": {k: v for (mn, mx), v in MODEL_TIERS.items() if mn == 20 for k, v in v.items()},
-            "48GB_GPU": {k: v for (mn, mx), v in MODEL_TIERS.items() if mn == 32 for k, v in v.items()},
-        },
+        "available_models": {name: caps["speed"] for name, caps in available_models.items()},
+        "strategies": {name: s["description"] for name, s in STRATEGIES.items()},
     }

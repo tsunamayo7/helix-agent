@@ -82,12 +82,14 @@ def is_claude_cli_running() -> bool:
 
     # Node.jsベースのClaude Codeも確認
     try:
+        no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         result = subprocess.run(
-            ["powershell", "-Command",
+            ["powershell", "-NoProfile", "-Command",
              "Get-Process -Name node -ErrorAction SilentlyContinue | "
              "Where-Object { $_.CommandLine -match 'claude' } | "
              "Select-Object -First 1 -ExpandProperty Id"],
             capture_output=True, text=True, timeout=10,
+            creationflags=no_window,
         )
         if result.stdout.strip():
             return True
@@ -197,9 +199,20 @@ def run_check() -> list[str]:
                 absence_min = (now - last_dt).total_seconds() / 60
                 if absence_min >= CLI_ABSENCE_WARN_MIN:
                     if should_alert(state, "cli_absent"):
+                        # Crash recovery
+                        recovery = save_crash_recovery()
+                        restart_msg = ""
+                        if recovery.get("auto_restart"):
+                            if attempt_auto_restart():
+                                restart_msg = "\n自動再起動を実行しました。"
+                            else:
+                                restart_msg = "\n自動再起動に失敗。手動でstart_claude.batを実行してください。"
                         alerts.append(
                             f"⚠️ **Watchdog**: Claude CLIが{int(absence_min)}分間停止中です。"
                             f"\n最終検出: {last_seen[:19]}"
+                            f"\nQdrantスナップショット: {'✅' if recovery.get('qdrant_snapshot') else '❌'}"
+                            f"\nCMEMバックアップ: {'✅' if recovery.get('cmem_backup') else '❌'}"
+                            f"{restart_msg}"
                         )
                         state.setdefault("last_alert_time", {})["cli_absent"] = now_str
             except (ValueError, TypeError):
@@ -271,6 +284,77 @@ def run_check() -> list[str]:
 
     save_state(state)
     return alerts
+
+
+def save_crash_recovery():
+    """CLI異常終了時のクラッシュリカバリ情報を生成."""
+    memory_dir = Path.home() / ".claude" / "projects" / "C--Development" / "memory"
+    checkpoint_file = memory_dir / "session_checkpoint.json"
+    recovery_file = memory_dir / "crash_recovery.json"
+
+    checkpoint = {}
+    if checkpoint_file.exists():
+        try:
+            checkpoint = json.loads(checkpoint_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Qdrant snapshot
+    qdrant_snapshot = False
+    try:
+        req = urllib.request.Request(
+            "http://localhost:6333/collections/mem0_shared/snapshots",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=10)
+        qdrant_snapshot = True
+    except Exception:
+        pass
+
+    # $CMEM backup
+    cmem_backup = False
+    cmem_db = Path.home() / ".claude-mem" / "claude-mem.db"
+    if cmem_db.exists():
+        try:
+            import shutil
+            shutil.copy2(str(cmem_db), str(cmem_db.with_suffix(".crash_backup")))
+            cmem_backup = True
+        except Exception:
+            pass
+
+    recovery = {
+        "crash_time": datetime.now(timezone.utc).isoformat(),
+        "last_checkpoint": checkpoint,
+        "qdrant_snapshot": qdrant_snapshot,
+        "cmem_backup": cmem_backup,
+        "auto_restart": True,
+    }
+    recovery_file.write_text(json.dumps(recovery, ensure_ascii=False, indent=2), encoding="utf-8")
+    return recovery
+
+
+def attempt_auto_restart():
+    """CLIのauto restart（bat経由）.
+
+    安全策: 既にCLIが動いている場合は再起動しない（二重起動防止）。
+    """
+    # 二重起動防止: もう一度CLIの存在を確認
+    if is_claude_cli_running():
+        return False  # CLIは生きている → 再起動しない
+
+    bat_path = Path("C:/Development/start/manual/start_claude.bat")
+    if not bat_path.exists():
+        return False
+    try:
+        no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        subprocess.Popen(
+            ["cmd", "/c", "start", "", str(bat_path)],
+            creationflags=no_window,
+        )
+        return True
+    except Exception:
+        return False
 
 
 def show_status():

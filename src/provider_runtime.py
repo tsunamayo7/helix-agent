@@ -26,6 +26,7 @@ from .tools import ToolRegistry
 
 SUPPORTED_PROVIDERS = ("ollama", "codex", "openai-compatible")
 VALID_CODEX_SANDBOXES = frozenset({"read-only", "workspace-write", "danger-full-access"})
+VALID_CODEX_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh"})
 
 
 def build_system_prompt(mode: str, provider_name: str) -> str:
@@ -641,14 +642,15 @@ class CodexProvider:
             details={
                 "path": codex_path or "",
                 "sandbox": self.config.codex_sandbox,
+                "effort": getattr(self.config, "codex_effort", "high"),
             },
         )
 
-    def _build_cmd(self, model: str, sandbox: str) -> list[str]:
+    def _build_cmd(self, model: str, sandbox: str, effort: str = "") -> list[str]:
         codex_path = _find_codex()
         if not codex_path:
             raise FileNotFoundError("Codex CLI not found in PATH.")
-        return [
+        cmd = [
             codex_path,
             "exec",
             "--json",
@@ -659,8 +661,13 @@ class CodexProvider:
             "--full-auto",
             "--skip-git-repo-check",
             "--ephemeral",
-            "-",
         ]
+        # reasoning_effort 指定 (none/minimal/low/medium/high/xhigh)
+        # -c フラグでconfig.tomlのmodel_reasoning_effortを上書き
+        if effort and effort in VALID_CODEX_EFFORTS:
+            cmd.extend(["-c", f"model_reasoning_effort={effort}"])
+        cmd.append("-")
+        return cmd
 
     async def run(
         self,
@@ -668,21 +675,29 @@ class CodexProvider:
         *,
         model: str = "",
         sandbox: str = "",
+        effort: str = "",
         cwd: str | None = None,
         timeout: int = 180,
     ) -> dict:
         selected_model = model or self.config.codex_model
         selected_sandbox = sandbox or self.config.codex_sandbox
+        selected_effort = effort or getattr(self.config, "codex_effort", "high")
         if selected_sandbox not in VALID_CODEX_SANDBOXES:
             return {
                 "error": f"Invalid Codex sandbox: {selected_sandbox}",
                 "provider": self.provider_name,
                 "model": selected_model,
             }
+        if selected_effort and selected_effort not in VALID_CODEX_EFFORTS:
+            return {
+                "error": f"Invalid Codex effort: {selected_effort}. Valid: {sorted(VALID_CODEX_EFFORTS)}",
+                "provider": self.provider_name,
+                "model": selected_model,
+            }
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                *self._build_cmd(selected_model, selected_sandbox),
+                *self._build_cmd(selected_model, selected_sandbox, selected_effort),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -731,6 +746,7 @@ class CodexProvider:
             "tool_count": parsed.tool_count,
             "files_touched": parsed.files_touched,
             "sandbox": selected_sandbox,
+            "effort": selected_effort,
         }
 
     async def think(
@@ -742,6 +758,7 @@ class CodexProvider:
         mode: str = "quality",
         cwd: str | None = None,
         sandbox: str = "",
+        effort: str = "",
         timeout: int = 180,
     ) -> dict:
         selected_model = self.config.codex_model if model == "auto" else model
@@ -756,6 +773,7 @@ class CodexProvider:
             prompt,
             model=selected_model,
             sandbox=sandbox,
+            effort=effort,
             cwd=cwd,
             timeout=timeout,
         )
@@ -772,6 +790,7 @@ class CodexProvider:
         on_progress=None,
         cwd: str | None = None,
         sandbox: str = "",
+        effort: str = "",
         timeout: int = 180,
     ) -> dict:
         del max_steps, tools, on_progress
@@ -789,6 +808,7 @@ class CodexProvider:
             prompt,
             model=selected_model,
             sandbox=sandbox,
+            effort=effort,
             cwd=cwd,
             timeout=timeout,
         )
@@ -802,6 +822,7 @@ class CodexProvider:
             "thread_id": result.get("thread_id"),
             "tool_count": result.get("tool_count", 0),
             "files_touched": result.get("files_touched", []),
+            "effort": result.get("effort", ""),
         }
 
     async def see(

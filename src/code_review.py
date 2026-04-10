@@ -230,6 +230,7 @@ class CodeReviewPipeline:
         timeout: int = 300,
         skip_sonnet: bool = False,
         codex_consult: bool = False,
+        codex_effort: str = "",
     ) -> ReviewResult:
         """
         Run the full review pipeline.
@@ -313,6 +314,7 @@ class CodeReviewPipeline:
                 files=files,
                 issues=result.issues,
                 context=context,
+                effort=codex_effort,
             )
             result.codex_raw = codex_result
             codex_issues = self._parse_codex_issues(codex_result)
@@ -443,12 +445,23 @@ class CodeReviewPipeline:
         files: list[str],
         issues: list[ReviewIssue],
         context: str,
+        effort: str = "",
     ) -> str:
-        """Consult Codex as an expert for difficult P1 issues."""
+        """Consult Codex as an expert for difficult P1 issues.
+
+        Args:
+            effort: Codex reasoning effort. Empty → config default ("high").
+                    P1問題が3件以上ある場合は自動で "xhigh" にエスカレート。
+        """
         p1_issues = [i for i in issues if i.severity == "P1"]
         issues_summary = "\n".join(
             f"- [{i.source}] {i.file}:{i.line} {i.title}" for i in p1_issues
         )
+
+        # 自動エスカレーション: P1が3件以上 → xhigh
+        if not effort and len(p1_issues) >= 3:
+            effort = "xhigh"
+            logger.info("Codex: escalating to xhigh (P1 count=%d)", len(p1_issues))
 
         prompt = (
             "あなたはエキスパートデバッガーです。以下のP1問題について、\n"
@@ -463,6 +476,7 @@ class CodeReviewPipeline:
             result = await self._agent.agent(
                 task=prompt,
                 provider="codex",
+                effort=effort,
                 timeout=180,
             )
             return result.get("answer", result.get("result", ""))

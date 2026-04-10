@@ -29,6 +29,10 @@ class AgentConfig:
     codex_model: str = "gpt-5.4"
     codex_sandbox: str = "workspace-write"
     codex_timeout: int = 180
+    # reasoning effort: none, minimal, low, medium, high, xhigh
+    # P1問題やデバッグ: high (デフォルト)
+    # 重大な設計判断や複雑なバグ: xhigh
+    codex_effort: str = "high"
 
     openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str = ""
@@ -294,6 +298,9 @@ class HelixAgent:
         self.client = self._providers["ollama"].client
         self.router = self._providers["ollama"].router
         self.background_agents = BackgroundAgentManager(self)
+        # Helix Corp: shared Qdrant memory for dept_search/dept_store
+        from .qdrant_memory import QdrantMemory, QdrantMemoryConfig
+        self.qdrant_memory = QdrantMemory(QdrantMemoryConfig())
 
     def _get_provider(self, provider: str):
         return self._providers[_normalize_provider(provider)] if provider in self._providers else None
@@ -354,6 +361,7 @@ class HelixAgent:
         provider: str = "auto",
         cwd: str | None = None,
         sandbox: str = "",
+        effort: str = "",
         timeout: int | None = None,
     ) -> dict:
         mode = mode or self.config.default_mode
@@ -368,6 +376,7 @@ class HelixAgent:
                 mode=mode,
                 cwd=cwd,
                 sandbox=sandbox,
+                effort=effort,
                 timeout=timeout or self.config.codex_timeout,
             )
 
@@ -385,6 +394,7 @@ class HelixAgent:
         _on_progress=None,
         cwd: str | None = None,
         sandbox: str = "",
+        effort: str = "",
         timeout: int | None = None,
     ) -> dict:
         mode = mode or self.config.default_mode
@@ -402,6 +412,7 @@ class HelixAgent:
                 on_progress=_on_progress,
                 cwd=cwd,
                 sandbox=sandbox,
+                effort=effort,
                 timeout=timeout or self.config.codex_timeout,
             )
 
@@ -543,7 +554,7 @@ class HelixAgent:
             self.router = self._providers["ollama"].router
         elif key in {"openai_base_url", "openai_api_key", "openai_api_key_env", "openai_model", "openai_timeout"}:
             self._providers["openai-compatible"] = OpenAICompatibleProvider(self.config)
-        elif key in {"codex_model", "codex_sandbox", "codex_timeout"}:
+        elif key in {"codex_model", "codex_sandbox", "codex_timeout", "codex_effort"}:
             self._providers["codex"] = CodexProvider(self.config)
 
         return {"updated": key, "old": str(old), "new": str(new_value)}

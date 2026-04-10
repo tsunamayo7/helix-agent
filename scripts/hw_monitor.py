@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,11 +28,13 @@ ALERT_FILE = LOG_DIR / "alerts.jsonl"
 def get_gpu_status() -> list[dict]:
     """nvidia-smiからGPU情報を取得."""
     try:
+        no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         result = subprocess.run(
             ["nvidia-smi",
              "--query-gpu=index,name,temperature.gpu,memory.used,memory.total,utilization.gpu,fan.speed,power.draw",
              "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=10,
+            creationflags=no_window,
         )
         if result.returncode != 0:
             return []
@@ -73,14 +76,16 @@ def get_cpu_info() -> dict:
         pass
 
     # CPU温度: LibreHardwareMonitor / OpenHardwareMonitor経由
+    no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     for ns in ["root/LibreHardwareMonitor", "root/OpenHardwareMonitor"]:
         try:
             result = subprocess.run(
-                ["powershell", "-Command",
+                ["powershell", "-NoProfile", "-Command",
                  f"Get-CimInstance -Namespace {ns} -ClassName Sensor 2>$null | "
                  "Where-Object { $_.SensorType -eq 'Temperature' -and $_.Name -match 'CPU' } | "
                  "Select-Object -First 1 -ExpandProperty Value"],
                 capture_output=True, text=True, timeout=10,
+                creationflags=no_window,
             )
             if result.returncode == 0 and result.stdout.strip():
                 info["temp_c"] = round(float(result.stdout.strip()), 1)
@@ -160,7 +165,14 @@ def check_alerts(gpus: list[dict], cpu_info: dict | None) -> list[dict]:
 
     # RAM使用率
     ram_pct = cpu_info.get("ram_pct") if cpu_info else None
-    if ram_pct is not None and ram_pct >= 90:
+    if ram_pct is not None and ram_pct >= 95:
+        alerts.append({
+            "level": "CRITICAL",
+            "type": "ram_usage",
+            "value": ram_pct,
+            "message": f"RAM使用率が危険: {ram_pct}% ({cpu_info.get('ram_used_mb')}MB/{cpu_info.get('ram_total_mb')}MB)",
+        })
+    elif ram_pct is not None and ram_pct >= 90:
         alerts.append({
             "level": "WARNING",
             "type": "ram_usage",
@@ -169,6 +181,62 @@ def check_alerts(gpus: list[dict], cpu_info: dict | None) -> list[dict]:
         })
 
     return alerts
+
+
+def auto_defend_vram(gpus: list[dict], alerts: list[dict]) -> list[str]:
+    """VRAM CRITICAL時にOllamaの未使用モデルを自動アンロードしてOOMフリーズを防止."""
+    actions = []
+    critical_resource = any(
+        a["level"] == "CRITICAL" and a["type"] in ("vram_usage", "ram_usage")
+        for a in alerts
+    )
+    if not critical_resource:
+        return actions
+
+    try:
+        # 現在ロード中のモデル確認
+        result = subprocess.run(
+            ["ollama", "ps"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return actions
+
+        lines = result.stdout.strip().split("\n")
+        if len(lines) <= 1:
+            return actions
+
+        # ヘッダー以外の行からモデル名を取得してアンロード
+        for line in lines[1:]:
+            parts = line.split()
+            if parts:
+                model_name = parts[0]
+                unload = subprocess.run(
+                    ["ollama", "stop", model_name],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if unload.returncode == 0:
+                    actions.append(f"アンロード成功: {model_name}")
+                else:
+                    actions.append(f"アンロード失敗: {model_name}")
+
+        if actions:
+            # Discord Webhook通知
+            try:
+                webhook_script = Path.home() / ".claude" / "hooks" / "discord_webhook_fallback.py"
+                if webhook_script.exists():
+                    msg = f"⚠️ **VRAM自動防御発動**\n" + "\n".join(actions)
+                    subprocess.run(
+                        ["python", str(webhook_script), msg],
+                        capture_output=True, timeout=15,
+                    )
+            except Exception:
+                pass
+
+    except Exception as e:
+        actions.append(f"自動防御エラー: {e}")
+
+    return actions
 
 
 def save_status(gpus: list[dict], cpu_info: dict | None, alerts: list[dict]) -> None:
@@ -256,10 +324,15 @@ if __name__ == "__main__":
             gpus = get_gpu_status()
             cpu_info = get_cpu_info()
             alerts = check_alerts(gpus, cpu_info)
+            defend_actions = auto_defend_vram(gpus, alerts)
             save_status(gpus, cpu_info, alerts)
             status = get_latest_status()
             if status:
                 print(format_status(status))
+            if defend_actions:
+                print("*** VRAM自動防御発動 ***")
+                for action in defend_actions:
+                    print(f"  {action}")
             if alerts:
                 print("*** アラート検出 ***")
             time.sleep(interval)
@@ -268,6 +341,8 @@ if __name__ == "__main__":
         gpus = get_gpu_status()
         cpu_info = get_cpu_info()
         alerts = check_alerts(gpus, cpu_info)
+        # VRAM CRITICAL時の自動防御
+        defend_actions = auto_defend_vram(gpus, alerts)
         save_status(gpus, cpu_info, alerts)
         # ハートビート送信
         try:
@@ -275,6 +350,10 @@ if __name__ == "__main__":
             write_heartbeat("hw_monitor", {"alert_count": len(alerts)})
         except ImportError:
             pass
+        if defend_actions:
+            print("*** VRAM自動防御 ***")
+            for action in defend_actions:
+                print(f"  {action}")
         if alerts:
             for a in alerts:
                 print(f"[{a['level']}] {a['message']}")

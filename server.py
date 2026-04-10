@@ -58,6 +58,7 @@ async def think(
     provider: str = "auto",
     cwd: str = "",
     sandbox: str = "",
+    effort: str = "",
     timeout: int = 180,
 ) -> dict:
     """Delegate a reasoning, analysis, or code task to a selected provider.
@@ -70,6 +71,8 @@ async def think(
         provider: "auto", "ollama", "codex", or "openai-compatible".
         cwd: Optional working directory for Codex-backed tasks.
         sandbox: Optional Codex sandbox override.
+        effort: Codex reasoning effort (none/minimal/low/medium/high/xhigh).
+                Empty → config default (high). Use xhigh for critical bugs/complex design.
         timeout: Timeout in seconds for Codex-backed requests.
     """
     return await runtime.think(
@@ -80,6 +83,7 @@ async def think(
         provider=provider,
         cwd=cwd or None,
         sandbox=sandbox,
+        effort=effort,
         timeout=timeout,
     )
 
@@ -94,6 +98,7 @@ async def agent_task(
     max_steps: int = 10,
     cwd: str = "",
     sandbox: str = "",
+    effort: str = "",
     timeout: int = 180,
     ctx: Context = None,
 ) -> dict:
@@ -101,6 +106,10 @@ async def agent_task(
 
     Ollama and OpenAI-compatible providers use the built-in ReAct loop.
     Codex runs as an autonomous implementation/review agent.
+
+    Args:
+        effort: Codex reasoning effort (none/minimal/low/medium/high/xhigh).
+                Empty → config default (high). Use xhigh for critical debugging/design.
     """
 
     async def on_progress(step: int, total: int, action: str) -> None:
@@ -121,6 +130,7 @@ async def agent_task(
         _on_progress=on_progress,
         cwd=cwd or None,
         sandbox=sandbox,
+        effort=effort,
         timeout=timeout,
     )
 
@@ -639,6 +649,42 @@ async def agent_types(action: str = "list", agent_type: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Helix Corp — Department Memory (部門別Qdrant検索/保存)
+# ---------------------------------------------------------------------------
+
+VALID_DEPARTMENTS = ["dept_hr", "dept_research", "dept_design", "dept_build", "dept_qa", "mem0_shared"]
+
+
+@mcp.tool()
+async def dept_search(department: str, query: str, top_k: int = 5) -> dict:
+    """Search department-specific Qdrant collection. Departments: dept_hr, dept_research, dept_design, dept_build, dept_qa, mem0_shared."""
+    if department not in VALID_DEPARTMENTS:
+        return {"error": f"Invalid department: {department}. Valid: {VALID_DEPARTMENTS}"}
+    try:
+        results = await runtime.qdrant_memory.search(query, top_k=top_k, collection=department)
+        return {"department": department, "query": query, "results": results, "count": len(results)}
+    except Exception as e:
+        return {"error": str(e), "department": department}
+
+
+@mcp.tool()
+async def dept_store(department: str, text: str, category: str = "", source: str = "") -> dict:
+    """Store knowledge in a department-specific Qdrant collection. Departments: dept_hr, dept_research, dept_design, dept_build, dept_qa."""
+    if department not in VALID_DEPARTMENTS or department == "mem0_shared":
+        return {"error": f"Cannot store to '{department}'. Use add_memory for mem0_shared."}
+    try:
+        metadata = {"department": department}
+        if category:
+            metadata["category"] = category
+        if source:
+            metadata["source"] = source
+        point_id = await runtime.qdrant_memory.add(text, metadata=metadata, collection=department)
+        return {"department": department, "point_id": point_id, "stored": True}
+    except Exception as e:
+        return {"error": str(e), "department": department}
+
+
+# ---------------------------------------------------------------------------
 # Evolving Memory — self-improving agent (hermes-agent inspired)
 # ---------------------------------------------------------------------------
 
@@ -695,6 +741,7 @@ async def code_review(
     generate_patch: bool = False,
     skip_sonnet: bool = False,
     codex_consult: bool = False,
+    codex_effort: str = "",
     max_files: int = 20,
 ) -> dict:
     """3-Layer Code Review Pipeline: gemma4($0) + Sonnet verification.
@@ -710,6 +757,8 @@ async def code_review(
         generate_patch: Generate unified diff fix patches
         skip_sonnet: Skip Sonnet verification (gemma4 only, fastest)
         codex_consult: Consult Codex as expert for P1 issues
+        codex_effort: Codex reasoning effort (none/minimal/low/medium/high/xhigh).
+                      Empty → default high. Auto-escalate to xhigh if P1>=3.
         max_files: Maximum files to review (default 20)
     """
     from src.code_review import CodeReviewPipeline
@@ -723,6 +772,7 @@ async def code_review(
         generate_patch=generate_patch,
         skip_sonnet=skip_sonnet,
         codex_consult=codex_consult,
+        codex_effort=codex_effort,
         max_files=max_files,
     )
     return result.to_dict()

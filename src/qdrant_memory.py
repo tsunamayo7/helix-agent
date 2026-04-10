@@ -36,10 +36,13 @@ class QdrantMemory:
             raise RuntimeError("Embedding returned empty result")
         return embeddings[0]
 
-    async def _qdrant_post(self, path: str, payload: dict, timeout: float = 15.0) -> dict:
+    async def _qdrant_post(self, path: str, payload: dict, timeout: float = 15.0, method: str = "POST") -> dict:
         url = f"{self.config.qdrant_url}{path}"
         async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.post(url, json=payload)
+            if method == "PUT":
+                r = await client.put(url, json=payload)
+            else:
+                r = await client.post(url, json=payload)
             r.raise_for_status()
             return r.json()
 
@@ -57,9 +60,11 @@ class QdrantMemory:
         top_k: int | None = None,
         source: str | None = None,
         category: str | None = None,
+        collection: str | None = None,
     ) -> list[dict]:
         vector = await self._embed(query)
         k = top_k or self.config.top_k
+        coll = collection or self.config.collection
 
         must_filters = [
             {"key": "user_id", "match": {"value": self.config.user_id}}
@@ -78,7 +83,7 @@ class QdrantMemory:
         }
 
         result = await self._qdrant_post(
-            f"/collections/{self.config.collection}/points/search",
+            f"/collections/{coll}/points/search",
             payload,
         )
 
@@ -93,9 +98,10 @@ class QdrantMemory:
             })
         return hits
 
-    async def add(self, text: str, metadata: dict | None = None) -> str:
+    async def add(self, text: str, metadata: dict | None = None, collection: str | None = None) -> str:
         vector = await self._embed(text)
         point_id = str(uuid.uuid4())
+        coll = collection or self.config.collection
 
         payload = {
             "data": text,
@@ -117,8 +123,9 @@ class QdrantMemory:
         }
 
         await self._qdrant_post(
-            f"/collections/{self.config.collection}/points",
+            f"/collections/{coll}/points",
             upsert_payload,
             timeout=15.0,
+            method="PUT",
         )
         return point_id

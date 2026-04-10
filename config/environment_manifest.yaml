@@ -1,0 +1,232 @@
+# Helix Environment Manifest — SSOT (Single Source of Truth)
+# このファイルが環境の正解。env_drift_check.pyがこれと実態を比較してドリフトを検知する
+# 更新時は必ずバージョンを上げて、rationaleを記載すること
+
+version: "1.0.0"
+updated: "2026-04-10"
+rationale: "初版。既存環境を反映"
+
+# ========== サービス ==========
+services:
+  qdrant:
+    url: "http://localhost:6333"
+    health_endpoint: "/collections"
+    expected_status: 200
+    criticality: critical
+    start_command: "C:\\Development\\tools\\qdrant\\qdrant.exe"
+    working_dir: "C:\\Development\\tools\\qdrant"
+
+  ollama:
+    url: "http://localhost:11434"
+    health_endpoint: "/api/tags"
+    expected_status: 200
+    criticality: critical
+    start_command: "C:\\Users\\tomot\\AppData\\Local\\Programs\\Ollama\\ollama app.exe"
+    expected_models:
+      - "qwen3-embedding:8b"
+      - "gemma4:31b"
+      - "qwen3-vl:32b"
+
+  qdrant_memory:
+    url: "http://localhost:8080"
+    health_endpoint: "/health"
+    expected_status: 200
+    criticality: high
+    python: "C:\\Program Files\\Python312\\pythonw.exe"
+    script: "C:\\Development\\start\\qdrant_memory_server.py"
+    required_modules: [fastapi, httpx, pydantic]
+
+  clip_bridge:
+    url: "http://localhost:9999"
+    health_endpoint: "/health"
+    expected_status: 200
+    criticality: medium
+    python: "C:\\Program Files\\Python312\\pythonw.exe"
+    script: "C:\\Development\\tools\\clip-bridge\\clip_server.py"
+
+  lightrag:
+    url: "http://127.0.0.1:9621"  # IPv4必須
+    health_endpoint: "/health"
+    expected_status: 200
+    criticality: medium
+    python: "C:\\Program Files\\Python312\\pythonw.exe"
+    script: "C:\\Development\\tools\\lightrag-server\\start_server.py"
+
+  health_server:
+    url: "http://localhost:8800"
+    health_endpoint: "/health"
+    expected_status: 200
+    criticality: low
+    python: "C:\\Development\\tools\\helix-agent\\.venv\\Scripts\\pythonw.exe"
+    script: "C:\\Development\\tools\\helix-agent\\scripts\\health_server.py"
+
+  dashboard:
+    url: "http://localhost:8801"
+    health_endpoint: "/api/status"
+    expected_status: 200
+    criticality: low
+
+  docker_desktop:
+    process_name: "Docker Desktop.exe"
+    criticality: high
+    start_command: "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe"
+
+# ========== スケジュールタスク ==========
+scheduled_tasks:
+  - name: Helix-Supervisor
+    interval_minutes: 3
+    criticality: high
+  - name: Helix-AssistantDaemon
+    interval_minutes: 5
+    criticality: high
+  - name: Helix-Watchdog
+    interval_minutes: 5
+    criticality: high
+  - name: helix-hw-monitor
+    interval_minutes: 5
+    criticality: medium
+  - name: Helix-UsageMonitor
+    interval_minutes: 15
+    criticality: medium
+  - name: Helix-HealthServer
+    interval_minutes: 1
+    criticality: low
+  - name: helix-x-monitor
+    interval_minutes: 30
+    criticality: low
+  - name: X-Feed-Collector
+    interval_minutes: 30
+    criticality: medium
+  - name: Helix-CMEMBridge
+    interval_minutes: 5
+    criticality: medium
+  - name: Helix-ConversationLogger
+    interval_minutes: 30
+    criticality: low
+  - name: Helix-DeptFeed
+    interval_minutes: 30
+    criticality: medium
+  - name: Helix-Failover
+    interval_minutes: 10
+    criticality: high
+  - name: Helix-Escalation
+    interval_minutes: 10
+    criticality: high
+  - name: Helix-Backup
+    interval_minutes: 1440  # daily 3:00
+    criticality: high
+  - name: Helix-IntegrityCheck
+    interval_minutes: 1440  # daily 3:15
+    criticality: medium
+  - name: Helix-MemoryHealth
+    interval_minutes: 1440  # daily 3:30
+    criticality: medium
+  - name: Helix-ContradictionCheck
+    interval_minutes: 10080  # weekly Sun 4:00
+    criticality: low
+  - name: Helix-QdrantDedup
+    interval_minutes: 10080  # weekly Sun 4:30
+    criticality: low
+  - name: Helix-SystemAudit
+    interval_minutes: 720  # 12h
+    criticality: low
+  - name: Helix-HealthCheck
+    interval_minutes: 60
+    criticality: low
+
+# ========== Qdrantコレクション ==========
+qdrant_collections:
+  - name: mem0_shared
+    min_points: 1000
+    criticality: critical
+  - name: dept_hr
+    min_points: 0  # 空でもOK (充填待ち)
+    criticality: low
+  - name: dept_research
+    min_points: 0
+    criticality: low
+  - name: dept_design
+    min_points: 0
+    criticality: low
+  - name: dept_build
+    min_points: 0
+    criticality: low
+  - name: dept_qa
+    min_points: 0
+    criticality: low
+  - name: lightrag_vdb_chunks_qwen3_embedding_8b_4096d
+    min_points: 0
+    criticality: low
+  - name: lightrag_vdb_entities_qwen3_embedding_8b_4096d
+    min_points: 0
+    criticality: low
+  - name: lightrag_vdb_relationships_qwen3_embedding_8b_4096d
+    min_points: 0
+    criticality: low
+
+# ========== フック ==========
+hooks:
+  - path: "C:\\Users\\tomot\\.claude\\hooks\\pretool_security.py"
+    matcher: "Bash|Write|Edit"
+    event: PreToolUse
+    criticality: critical
+  - path: "C:\\Users\\tomot\\.claude\\hooks\\smart_approval.py"
+    matcher: ""
+    event: PreToolUse
+    criticality: high
+  - path: "C:\\Users\\tomot\\.claude\\hooks\\session_checkpoint.py"
+    matcher: ""
+    event: PostToolUse
+    criticality: medium
+  - path: "C:\\Users\\tomot\\.claude\\hooks\\persist_task.py"
+    matcher: "TaskCreate|TaskUpdate"
+    event: PostToolUse
+    criticality: medium
+  - path: "C:\\Users\\tomot\\.claude\\hooks\\failure_learner.py"
+    matcher: "Bash"
+    event: PostToolUse
+    criticality: low
+
+# ========== Python環境 ==========
+python_environments:
+  system_python312:
+    path: "C:\\Program Files\\Python312\\python.exe"
+    pythonw: "C:\\Program Files\\Python312\\pythonw.exe"
+    required_for: [qdrant_memory, clip_bridge, lightrag, helix_scripts]
+    required_modules: [fastapi, httpx, pydantic, requests]
+
+  helix_agent_venv:
+    path: "C:\\Development\\tools\\helix-agent\\.venv\\Scripts\\python.exe"
+    pythonw: "C:\\Development\\tools\\helix-agent\\.venv\\Scripts\\pythonw.exe"
+    required_for: [helix_agent_mcp, health_server, dashboard_server]
+
+  browser_use_env:
+    path: "C:\\Users\\tomot\\.browser-use-env\\Scripts\\python.exe"
+    required_for: [browser_use_cli]
+    note: "汎用にするとfastapi等が不足するので注意"
+
+# ========== 重要パス ==========
+paths:
+  memory_dir: "C:\\Users\\tomot\\.claude\\projects\\C--Development\\memory"
+  claude_md: "C:\\Users\\tomot\\.claude\\CLAUDE.md"
+  settings_json: "C:\\Users\\tomot\\.claude\\settings.json"
+  memory_md: "C:\\Users\\tomot\\.claude\\projects\\C--Development\\memory\\MEMORY.md"
+  start_bat: "C:\\Development\\start\\manual\\start_claude.bat"
+  start_services_bat: "C:\\Development\\start\\auto\\start_all_services.bat"
+  run_bg_vbs: "C:\\Development\\start\\manual\\run_bg.vbs"
+  helix_agent_config: "C:\\Users\\tomot\\.helix-agent"
+  age_key: "C:\\Users\\tomot\\.age\\key.txt"
+
+# ========== 期待する外部バイナリ ==========
+external_binaries:
+  - name: claude
+    command: "claude --version"
+    min_version: "2.0.0"
+  - name: uv
+    command: "uv --version"
+  - name: docker
+    command: "docker --version"
+  - name: ollama
+    command: "ollama --version"
+  - name: gh
+    command: "gh --version"
