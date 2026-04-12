@@ -405,10 +405,18 @@ def collect_startup() -> dict:
         "clip_bridge": "http://localhost:9999/health",
         "lightrag": "http://127.0.0.1:9621/health",
         "health_server": "http://localhost:8800/health",
-        "dashboard": "http://localhost:8801/api/status",
+        "dashboard": "http://localhost:8801/",  # /api/status is slow (~20s sync collect_all), root is instant
     }
     for name, url in services.items():
-        ok = _http_get(url) is not None
+        if name == "dashboard":
+            # Dashboard root returns HTML, not JSON — check HTTP 200 only
+            try:
+                with urllib.request.urlopen(url, timeout=3) as resp:
+                    ok = resp.status == 200
+            except Exception:
+                ok = False
+        else:
+            ok = _http_get(url) is not None
         data["services"][name] = "UP" if ok else "DOWN"
 
     # Scheduled tasks (一括取得)
@@ -436,7 +444,7 @@ def collect_startup() -> dict:
             "total": len(tasks),
             "ok": sum(1 for t in tasks if t["result"] == "0"),
             "never_run": sum(1 for t in tasks if t["last_run"] == "never"),
-            "failed": sum(1 for t in tasks if t["result"] not in ("0", "267011")),
+            "failed": sum(1 for t in tasks if t["result"] not in ("0", "267011", "267009")),  # 267009=TASK_RUNNING
             "items": tasks,
         }
     except Exception as e:

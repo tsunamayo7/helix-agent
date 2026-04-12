@@ -261,7 +261,7 @@ def collect_dept_rag() -> dict:
 
 
 def collect_scheduled_tasks() -> list[dict]:
-    """Helix系スケジュールタスクの状態を取得."""
+    """Helix系スケジュールタスクの状態を取得 (1回のPowerShell呼び出しで一括)."""
     import subprocess
     tasks_to_check = [
         "Helix-Supervisor", "Helix-AssistantDaemon", "Helix-Watchdog",
@@ -272,27 +272,36 @@ def collect_scheduled_tasks() -> list[dict]:
         "Helix-Failover", "Helix-Escalation", "Helix-DeptFeed",
         "Helix-SystemAudit", "Helix-CriticalGuard", "Helix-TimeoutChecker",
     ]
+    # 全タスクを1回のPowerShell呼び出しで一括取得 (21回→1回に削減)
+    names_array = ",".join(f"'{n}'" for n in tasks_to_check)
+    ps_cmd = (
+        f"foreach($n in @({names_array})) {{"
+        f"  $i = Get-ScheduledTaskInfo -TaskName $n -EA SilentlyContinue; "
+        f"  if (-not $i) {{ Write-Output \"$n::MISSING\" }} "
+        f"  else {{ Write-Output \"$n::$($i.LastRunTime.ToString('o'))|$($i.LastTaskResult)\" }}"
+        f"}}"
+    )
     tasks = []
-    for name in tasks_to_check:
-        try:
-            ps_cmd = (
-                f"$i = Get-ScheduledTaskInfo -TaskName '{name}' -EA SilentlyContinue; "
-                f"if (-not $i) {{ 'MISSING' }} "
-                f"else {{ \"$($i.LastRunTime.ToString('o'))|$($i.LastTaskResult)\" }}"
-            )
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", ps_cmd],
-                capture_output=True, text=True, timeout=5,
-                creationflags=0x08000000 if os.name == "nt" else 0,
-            )
-            output = result.stdout.strip()
-            if output == "MISSING":
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=15,
+            creationflags=0x08000000 if os.name == "nt" else 0,
+        )
+        output_lines = result.stdout.strip().splitlines()
+        parsed_names = set()
+        for line in output_lines:
+            line = line.strip()
+            if "::" not in line:
+                continue
+            name, value = line.split("::", 1)
+            parsed_names.add(name)
+            if value == "MISSING":
                 tasks.append({"name": name, "status": "missing", "last_run": None, "result": None})
                 continue
-            parts = output.split("|")
+            parts = value.split("|")
             if len(parts) == 2:
                 last_run, result_code = parts
-                # 1999年は未実行
                 if last_run.startswith("1999"):
                     tasks.append({"name": name, "status": "never_run", "last_run": None, "result": None})
                 else:
@@ -310,7 +319,13 @@ def collect_scheduled_tasks() -> list[dict]:
                         })
                     except Exception:
                         tasks.append({"name": name, "status": "parse_error", "last_run": last_run, "result": result_code})
-        except Exception:
+        # PowerShell出力に含まれなかったタスクをcheck_failedとして追加
+        for name in tasks_to_check:
+            if name not in parsed_names:
+                tasks.append({"name": name, "status": "check_failed", "last_run": None, "result": None})
+    except Exception:
+        # PowerShell自体が失敗した場合、全タスクをcheck_failedに
+        for name in tasks_to_check:
             tasks.append({"name": name, "status": "check_failed", "last_run": None, "result": None})
     return tasks
 

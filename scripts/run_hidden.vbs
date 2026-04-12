@@ -23,8 +23,9 @@ For i = 1 To WScript.Arguments.Count - 1
     args = args & " " & WScript.Arguments(i)
 Next
 
-' Run with pythonw.exe (no window)
-cmd = "pythonw """ & scriptDir & "\" & scriptName & """" & args
+' Run with python.exe (vbHide=0 handles window suppression)
+' pythonw.exe causes sys.stdout=None which breaks logging/heartbeat writes
+cmd = "python """ & scriptDir & "\" & scriptName & """" & args
 
 ' 0 = vbHide, True = wait for completion
 objShell.Run cmd, 0, True
