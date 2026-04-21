@@ -43,16 +43,22 @@ deploy:
         client-id: ${{ secrets.AZURE_CLIENT_ID }}
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-    - uses: azure/docker-login@v2
-      with:
-        login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+    - run: az acr login --name ${{ secrets.ACR_NAME }}
     - run: |
-        docker build -t $ACR_LOGIN_SERVER/helix-agent:$GITHUB_SHA .
-        docker push $ACR_LOGIN_SERVER/helix-agent:$GITHUB_SHA
+        docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/helix-agent:$GITHUB_SHA .
+        docker push ${{ secrets.ACR_LOGIN_SERVER }}/helix-agent:$GITHUB_SHA
     - uses: azure/container-apps-deploy-action@v2
       with:
         imageToDeploy: ${{ secrets.ACR_LOGIN_SERVER }}/helix-agent:${{ github.sha }}
 ```
+
+## Required Azure RBAC
+
+| 操作 | 必要なロール |
+|------|------------|
+| ACR push | AcrPush |
+| Container Apps deploy | Contributor or Container Apps Contributor |
+| Key Vault secrets read | Key Vault Secrets User |
 
 ## Prerequisites (for future implementation)
 
@@ -71,4 +77,4 @@ This plan follows the GitHub + Azure integration pattern that APC implements for
 
 ## Status
 
-**Planning stage** — not yet implemented. Prepared as a reference architecture for future Azure deployment.
+**構成案・今後検証予定** — 未実装。Azure環境が利用可能になった段階で検証を行う予定。
