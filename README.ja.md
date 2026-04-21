@@ -364,7 +364,6 @@ MIT
 
 ## 関連プロジェクト
 
-- [helix-ai-studio](https://github.com/tsunamayo7/helix-ai-studio) — 7プロバイダー対応の統合 AI チャットスタジオ
 - [helix-pilot](https://github.com/tsunamayo7/helix-pilot) — ローカル Vision LLM で Windows デスクトップを操作する MCP
 - [claude-code-codex-agents](https://github.com/tsunamayo7/claude-code-codex-agents) — Codex CLI ブリッジ MCP
 - [helix-sandbox](https://github.com/tsunamayo7/helix-sandbox) — Docker + Windows Sandbox 連携 MCP
