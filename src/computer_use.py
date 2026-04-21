@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import base64
-import json
-import tempfile
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -16,7 +13,7 @@ from .vision import VisionAnalyzer
 HELIX_PILOT_URL = "http://localhost:8765"
 
 try:
-    from playwright.async_api import async_playwright, Browser, Page
+    from playwright.async_api import async_playwright, Browser, Page  # noqa: F401
     HAS_PLAYWRIGHT = True
 except ImportError:
     HAS_PLAYWRIGHT = False

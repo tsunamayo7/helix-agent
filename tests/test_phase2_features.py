@@ -276,7 +276,7 @@ class TestForkTask:
 
     @pytest.mark.asyncio
     async def test_fork_task_no_models(self):
-        with patch("src.ollama_client.OllamaClient") as MockClient, \
+        with patch("src.ollama_client.OllamaClient"), \
              patch("src.router.ModelRouter") as MockRouter:
             mock_router = MockRouter.return_value
             mock_router.select_for_task = AsyncMock(return_value=None)
@@ -301,7 +301,7 @@ class TestForkTask:
             finished=True,
         )
 
-        with patch("src.ollama_client.OllamaClient") as MockClient, \
+        with patch("src.ollama_client.OllamaClient"), \
              patch("src.router.ModelRouter") as MockRouter, \
              patch("src.react_loop.ReactLoop") as MockLoop:
             mock_router = MockRouter.return_value

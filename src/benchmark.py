@@ -280,8 +280,8 @@ def validate_json_output(response: str) -> tuple[bool, float]:
 
 def validate_numbered_list(response: str) -> tuple[bool, float]:
     """Check if response is a numbered list with exactly 3 items."""
-    lines = [l.strip() for l in response.strip().split("\n") if l.strip()]
-    numbered = [l for l in lines if re.match(r"^\d+[\.\)]\s*\w+", l)]
+    lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
+    numbered = [line for line in lines if re.match(r"^\d+[\.\)]\s*\w+", line)]
 
     if len(numbered) == 3:
         return True, 1.0
@@ -593,7 +593,7 @@ class BenchmarkEngine:
                     tokens_per_sec=round(tps, 1),
                 ))
 
-            except Exception as e:
+            except Exception:
                 elapsed = time.monotonic() - start
                 results.append(BenchmarkResult(
                     category=test.category,
