@@ -1,23 +1,24 @@
 # Security Policy
 
-## Supported Scope
+## Supported Versions
 
-Please report vulnerabilities involving:
+| Version | Supported          |
+| ------- | ------------------ |
+| 0.15.x  | :white_check_mark: |
+| < 0.15  | :x:                |
 
-- provider credential handling
-- unsafe command execution paths
-- sandbox bypasses
-- path traversal or file access issues
-- prompt injection that crosses intended trust boundaries
+## Reporting a Vulnerability
 
-## Reporting
+If you discover a security vulnerability, please report it responsibly:
 
-Please open a private security report through GitHub Security Advisories if available.
+1. **Do NOT** open a public issue
+2. Email: tsuna.konomiya@gmail.com
+3. Include: description, steps to reproduce, potential impact
+4. Expected response time: 48 hours
 
-If private reporting is not available, contact the maintainer directly before publishing details.
+## Security Measures
 
-## Guidance
-
-- Do not include live credentials in reports
-- Include reproduction steps
-- Include affected provider path if known: `ollama`, `codex`, or `openai-compatible`
+- All LLM inference runs locally (Ollama) — no data sent to external services
+- Retry loop detection prevents infinite API calls
+- Input validation on all MCP tool parameters
+- No secrets stored in code — environment variables only

@@ -825,7 +825,6 @@ SECTION_DOCS = {
     ],
     "7_projects": [
         "memory/project_helix_agent.md",
-        "memory/project_helix_clipper.md",
     ],
     "8_security": [
         "~/.claude/hooks/smart_approval.py",

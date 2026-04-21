@@ -1,40 +1,26 @@
 # Contributing to helix-agent
 
-## Setup
+## Getting Started
 
-```bash
-git clone https://github.com/tsunamayo7/helix-agent.git
-cd helix-agent
-uv sync
-```
+1. Fork the repository
+2. Clone your fork
+3. Install dependencies: `uv sync --all-extras`
+4. Run tests: `uv run pytest -q`
 
-## Local Checks
+## Development Workflow
 
-Run the focused test suite:
+- Create a feature branch from `master`
+- Write tests first (TDD encouraged)
+- Run `uv run ruff check src/ tests/` before committing
+- Ensure all tests pass: `uv run pytest -q`
+- Open a Pull Request with a clear description
 
-```bash
-python -m pytest tests/test_agent.py tests/test_router.py tests/test_react_loop.py tests/test_ollama_client.py -q
-```
+## Code Style
 
-Run the full suite if your environment allows temporary file creation cleanly:
+- Follow PEP 8 (enforced by ruff)
+- Type hints on public functions
+- Docstrings on modules and classes
 
-```bash
-python -m pytest tests -q
-```
+## Reporting Issues
 
-## Scope
-
-Good contributions include:
-
-- provider improvements
-- routing heuristics
-- better background agent summaries
-- documentation and examples
-- additional verification coverage
-
-## Pull Requests
-
-- Keep changes narrow and reviewable
-- Include tests when behavior changes
-- Update `README.md` when public behavior changes
-- Call out provider-specific limitations clearly
+Use GitHub Issues with the provided templates.

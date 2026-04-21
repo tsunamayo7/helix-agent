@@ -4,6 +4,8 @@
 
 日本語README: **[README.ja.md](README.ja.md)**
 
+[![CI](https://github.com/tsunamayo7/helix-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/tsunamayo7/helix-agent/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/tsunamayo7/helix-agent/actions/workflows/codeql.yml/badge.svg)](https://github.com/tsunamayo7/helix-agent/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-10b981.svg)](https://modelcontextprotocol.io)
@@ -192,9 +194,9 @@ Automated multi-LLM code review that catches **100% of issues** at ~¥30 ($0.20)
 ```
 Layer 2: gemma4 ReAct review ($0, with web_search + RAG)
   ↓ findings + context
-Layer 3: Sonnet 4.6 verification + cross-file analysis (~¥10)
+Layer 3: Sonnet 4.7 verification + cross-file analysis (~¥10)
   ↓ merged findings
-Layer 4: Opus 4.6 meta-review (~¥5, reads summary only — no source code)
+Layer 4: Opus 4.7 meta-review (~¥5, reads summary only — no source code)
   ↓ final verdict
 Codex:   Consultant (P1 issues only, on-demand)
 ```
@@ -205,8 +207,8 @@ Codex:   Consultant (P1 issues only, on-demand)
 |----------|:--------:|:------:|:----:|
 | gemma4+RAG (local) | 7 | 1 | **$0** |
 | Codex GPT-5.3 | 5 | 0 | ~¥50 |
-| Sonnet 4.6 | 14 | 1 | ~¥20 |
-| Opus 4.6 | 16 | 4 | ~¥100 |
+| Sonnet 4.7 | 14 | 1 | ~¥20 |
+| Opus 4.7 | 16 | 4 | ~¥100 |
 | **4-Layer Combined** | **16+** | **all** | **~¥30** |
 
 > **Key finding**: gemma4 + RAG ($0) outperforms Codex GPT-5.3 (~¥50) in code review.
@@ -386,7 +388,7 @@ helix-agent implements all three MCP primitives as defined by [Anthropic Academy
 | **Prompts** | User-controlled (workflows) | 3 | `retry_report`, `optimize_tokens`, `setup_guide` |
 
 ```
-Claude Code (Opus 4.6 — decides what to do)
+Claude Code (Opus 4.7 — decides what to do)
   │
   ├─ Resources (read-only)
   │   ├─ helix://status       → runtime state, backend, retry-guard stats
