@@ -4,7 +4,7 @@
   方式A (高精度): セッションJSONLのトークン累計からコンテキストウィンドウ使用率を計算
   方式B (補助): スクリーンショット+Vision OCR（フォールバック）
 
-Opus 4.6 (1M context) のコンテキストウィンドウサイズを基準に計算。
+Opus 4.7 (1M context) のコンテキストウィンドウサイズを基準に計算。
 Claudeのコンテキスト管理はキャッシュ+圧縮があるため正確な値ではないが、
 compact推奨の判断材料としては十分。
 
@@ -21,7 +21,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Opus 4.6 (1M context) のコンテキストウィンドウ
+# Opus 4.7 (1M context) のコンテキストウィンドウ
 CONTEXT_WINDOW = 1_000_000
 
 # セッションJSONLのパス

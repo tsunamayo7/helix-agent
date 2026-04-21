@@ -18,7 +18,9 @@ If you discover a security vulnerability, please report it responsibly:
 
 ## Security Measures
 
-- All LLM inference runs locally (Ollama) — no data sent to external services
+- Default inference runs locally via Ollama — no data leaves the machine
+- Cloud AI providers (Claude, etc.) are used only when explicitly enabled by the user
+- Sensitive inputs are routed through local processing or redacted before external calls
 - Retry loop detection prevents infinite API calls
 - Input validation on all MCP tool parameters
 - No secrets stored in code — environment variables only

@@ -105,7 +105,7 @@ Opus still makes every decision. It just isn't asked to look at pixels.
 ## Architecture
 
 ```
-Claude Code (Opus 4.6 — decides WHAT)
+Claude Code (Opus 4.7 — decides WHAT)
   │ MCP (cheap)
   ▼
 helix-agent

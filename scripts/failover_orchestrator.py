@@ -46,7 +46,7 @@ HEALTH_URL = "http://localhost:8800"
 SERVICES = [
     {
         "name": "claude_code",
-        "display": "Claude Code (Opus 4.6)",
+        "display": "Claude Code (Opus 4.7)",
         "priority": 1,
         "check_type": "process",
         "process_names": ["claude.exe", "node"],

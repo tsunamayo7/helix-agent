@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-compatible-10b981.svg)](https://modelcontextprotocol.io)
-[![Tests](https://img.shields.io/badge/tests-347%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-367%20passing-brightgreen.svg)](#)
 [![v0.15.1](https://img.shields.io/badge/version-0.15.1-7c3aed.svg)](#)
 [![MCP 3-Primitive](https://img.shields.io/badge/MCP-Tools%20%2B%20Resources%20%2B%20Prompts-10b981.svg)](#)
 [![Works on 8GB VRAM](https://img.shields.io/badge/GPU-8GB%20VRAM%20OK-green.svg)](#gpu-auto-detection--model-tiers)

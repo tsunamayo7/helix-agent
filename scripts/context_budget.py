@@ -27,7 +27,7 @@ MEMORY_DIR = Path.home() / ".claude" / "projects" / "C--Development" / "memory"
 CLAUDE_MD = Path.home() / ".claude" / "CLAUDE.md"
 PROJECT_CLAUDE_MD = Path("C:/Development/.claude/CLAUDE.md") if Path("C:/Development/.claude/CLAUDE.md").exists() else None
 
-# Opus 4.6 1Mコンテキスト
+# Opus 4.7 1Mコンテキスト
 MAX_CONTEXT_TOKENS = 1_000_000
 
 # トークン推定係数
@@ -78,7 +78,7 @@ def analyze_file(filepath: Path) -> dict:
 def run_check(detail: bool = False) -> dict:
     """コンテキスト予算チェック."""
     print("=== Context Budget Check ===")
-    print(f"Max context: {MAX_CONTEXT_TOKENS:,} tokens (Opus 4.6 1M)")
+    print(f"Max context: {MAX_CONTEXT_TOKENS:,} tokens (Opus 4.7 1M)")
     print()
 
     components = []

@@ -9,3 +9,26 @@ wheels/
 # Virtual environments
 .venv
 lightrag.log
+
+# Secrets
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+credentials*
+secrets*
+.claude/channels/
+.claude/settings.local.json
+
+# Runtime data
+data/
+logs/
+*.lock
+
+# IDE
+.idea/
+.vscode/
+
+# uv
+uv.lock

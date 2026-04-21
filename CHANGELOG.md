@@ -18,8 +18,8 @@ All notable changes to helix-agent are documented here. Format loosely follows [
 ### Added
 - **4-Layer Code Review Pipeline** (`code_review` MCP tool):
   - Layer 2: gemma4 ReAct review with `web_search` + RAG ($0)
-  - Layer 3: Sonnet 4.6 verification + cross-file analysis (~¥10)
-  - Layer 4: Opus 4.6 meta-review — summary-only, no source code (~¥5)
+  - Layer 3: Sonnet 4.7 verification + cross-file analysis (~¥10)
+  - Layer 4: Opus 4.7 meta-review — summary-only, no source code (~¥5)
   - Codex consultant for P1 issues (on-demand)
   - Empirical: gemma4+RAG ($0) outperforms Codex GPT-5.3 (~¥50) in finding uniqueness
   - `skip_sonnet=True` for daily $0 reviews, `codex_consult=True` for release gates
