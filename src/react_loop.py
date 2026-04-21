@@ -567,7 +567,7 @@ class ReactLoop:
             if s.observation and s.observation != "(finished)":
                 parts.append(f"Step {s.step} ({s.action}): {s.observation[:200]}")
         if parts:
-            return f"Partial results (max steps reached):\n" + "\n".join(parts[-3:])
+            return "Partial results (max steps reached):\n" + "\n".join(parts[-3:])
         return f"Reached max steps. Last thought: {last.thought[:300]}"
 
     def _make_partial_result(

@@ -1,9 +1,7 @@
 """Tests for agent_browser_session module."""
 from __future__ import annotations
 
-import asyncio
-import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

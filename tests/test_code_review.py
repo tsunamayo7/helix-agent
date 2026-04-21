@@ -2,7 +2,6 @@
 
 import json
 import pytest
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 from src.code_review import CodeReviewPipeline, ReviewIssue, ReviewResult

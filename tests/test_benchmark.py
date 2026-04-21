@@ -1,8 +1,5 @@
 """Tests for the benchmark engine."""
 
-import json
-import tempfile
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,7 +7,6 @@ import pytest
 from src.benchmark import (
     BENCHMARK_LITE_TESTS,
     BenchmarkEngine,
-    BenchmarkTest,
     ModelBenchmark,
     _inference_timeout,
     _warmup_timeout,

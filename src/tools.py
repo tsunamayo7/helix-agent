@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Awaitable
 
 
@@ -99,7 +98,7 @@ async def _tool_calculate(expression: str) -> str:
     """Safely evaluate a math expression."""
     allowed = set("0123456789+-*/().% ")
     if not all(c in allowed for c in expression):
-        return f"Error: unsafe expression. Only math operators allowed."
+        return "Error: unsafe expression. Only math operators allowed."
     try:
         result = eval(expression, {"__builtins__": {}}, {"math": math})
         return str(result)

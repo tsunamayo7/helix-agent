@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
-import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,7 +22,7 @@ from src.react_loop import (
     SMALLER_MODEL_FALLBACKS,
 )
 from src.tools import ToolRegistry, Tool, create_default_registry
-from src.tracing import TraceRecorder, TraceSummary
+from src.tracing import TraceRecorder
 
 
 # ── TraceRecorder tests ──

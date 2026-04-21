@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .benchmark import BenchmarkEngine, ModelBenchmark
+from .benchmark import BenchmarkEngine
 from .ollama_client import OllamaClient
 
 

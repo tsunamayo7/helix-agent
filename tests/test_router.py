@@ -1,11 +1,9 @@
 """Tests for model router and capability detection."""
 
-import pytest
 
 from src.router import (
     Capability,
     ModelInfo,
-    ModelRouter,
     _detect_capabilities,
     _infer_capability,
 )

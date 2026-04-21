@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-import base64
-import json
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

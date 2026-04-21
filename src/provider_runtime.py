@@ -11,7 +11,6 @@ import json
 import os
 import re
 import shutil
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -21,7 +20,7 @@ import httpx
 from .builtin_tools import create_full_registry
 from .ollama_client import OllamaClient
 from .react_loop import ReactLoop
-from .router import Capability, ModelInfo, ModelRouter, _infer_capability
+from .router import Capability, ModelRouter, _infer_capability
 from .tools import ToolRegistry
 
 SUPPORTED_PROVIDERS = ("ollama", "codex", "openai-compatible")
