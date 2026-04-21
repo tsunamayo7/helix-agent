@@ -34,5 +34,5 @@ jobs:
         if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v6
         with:
-          file: coverage.xml
+          files: coverage.xml
           fail_ci_if_error: false

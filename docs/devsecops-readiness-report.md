@@ -4,10 +4,10 @@
 
 | 要素 | 状態 | 詳細 |
 |------|:---:|------|
-| GitHub Actions CI | ✅ | Python 3.12/3.13, ruff, mypy advisory, pytest+coverage |
+| GitHub Actions CI | ✅ | Python 3.12/3.13, ruff, mypy advisory（現時点ではadvisoryとして導入。警告を確認しながら段階的にstrict化予定）, pytest+coverage |
 | CodeQL | ✅ | security-extended, 週次+push/PR, v4 |
 | Dependabot | ✅ | pip + GitHub Actions, 週次, labels付き |
-| Dependency Review | ✅ | PR時 high severity fail |
+| Dependency Review | ✅ | PR時 high severity fail。マージブロックとして機能させるにはbranch protection/rulesetsでrequired checks化が必要 |
 | SECURITY.md | ✅ | 脆弱性報告プロセス, 48h応答 |
 | CONTRIBUTING.md | ✅ | 開発ワークフロー, TDD推奨 |
 | CODEOWNERS | ✅ | @tsunamayo7 |
@@ -55,3 +55,7 @@
 - 「Azureでのデプロイ経験があります」
 - 「カバレッジ80%以上を維持しています」(未測定)
 - 「機密情報を絶対に外部送信しません」(クラウドAI利用あり)
+- 「mypyも完全に通っています」(現時点はadvisory、continue-on-error: true)
+
+### テスト数について
+- 一部資料に旧表記(347)が残っている可能性がありますが、現時点の実測ではhelix-agentは367 testsです

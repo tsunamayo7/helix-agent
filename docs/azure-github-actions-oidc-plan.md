@@ -49,8 +49,15 @@ deploy:
         docker push ${{ secrets.ACR_LOGIN_SERVER }}/helix-agent:$GITHUB_SHA
     - uses: azure/container-apps-deploy-action@v2
       with:
+        acrName: ${{ secrets.ACR_NAME }}
+        containerAppName: helix-agent
+        resourceGroup: ${{ secrets.AZURE_RESOURCE_GROUP }}
         imageToDeploy: ${{ secrets.ACR_LOGIN_SERVER }}/helix-agent:${{ github.sha }}
 ```
+
+## Secrets vs Variables
+
+OIDCではクライアントシークレットを使用しないため、`AZURE_CLIENT_ID`、`AZURE_TENANT_ID`、`AZURE_SUBSCRIPTION_ID` は GitHub Actions の `vars`（Variables）に格納することを推奨する。`secrets` に格納しても動作するが、これらの値自体は機密ではなく（Azure ADのパブリック情報）、`vars` に寄せることでシークレットの管理対象を最小限に保てる。`ACR_NAME` / `ACR_LOGIN_SERVER` も同様に `vars` で管理可能。
 
 ## Required Azure RBAC
 
