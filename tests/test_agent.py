@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from src.agent import AgentConfig, HelixAgent
@@ -135,6 +137,7 @@ class TestHelixAgent:
         assert result["count"] == 1
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(os.environ.get("CI") == "true", reason="Requires Ollama connection")
     async def test_see_missing_image(self):
         agent = HelixAgent()
         result = await agent.see(image_path="/nonexistent/image.png", provider="ollama")

@@ -1,6 +1,8 @@
 """Tests for built-in tools and PathGuard."""
 
 import json
+import os
+
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -125,6 +127,7 @@ class TestWriteFileTool:
 
 class TestListFilesTool:
     @pytest.mark.asyncio
+    @pytest.mark.skipif(os.environ.get("CI") == "true", reason="Local path not available in CI")
     async def test_list_directory(self):
         result = await _tool_list_files("C:/Development/tools/helix-agent")
         assert "README.md" in result
@@ -143,6 +146,7 @@ class TestListFilesTool:
 
 class TestSearchInFileTool:
     @pytest.mark.asyncio
+    @pytest.mark.skipif(os.environ.get("CI") == "true", reason="Local path not available in CI")
     async def test_search_found(self):
         params = json.dumps({
             "path": "C:/Development/tools/helix-agent/README.md",
@@ -152,6 +156,7 @@ class TestSearchInFileTool:
         assert "L" in result  # Line numbers
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(os.environ.get("CI") == "true", reason="Local path not available in CI")
     async def test_search_not_found(self):
         params = json.dumps({
             "path": "C:/Development/tools/helix-agent/README.md",

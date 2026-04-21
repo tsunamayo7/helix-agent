@@ -13,6 +13,9 @@ import sys
 
 import pytest
 
+_has_tkinter = importlib.util.find_spec("tkinter") is not None
+pytestmark = pytest.mark.skipif(not _has_tkinter, reason="tkinter not available")
+
 
 def test_module_imports():
     """ja_input must import without touching tk display until launch()."""
