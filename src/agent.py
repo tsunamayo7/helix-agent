@@ -300,8 +300,13 @@ class HelixAgent:
         self.router = self._providers["ollama"].router
         self.background_agents = BackgroundAgentManager(self)
         # Helix Corp: shared Qdrant memory for dept_search/dept_store
+        import os
         from .qdrant_memory import QdrantMemory, QdrantMemoryConfig
-        self.qdrant_memory = QdrantMemory(QdrantMemoryConfig())
+        _qcfg = QdrantMemoryConfig(
+            qdrant_url=os.environ.get("QDRANT_URL", "http://localhost:6333"),
+            ollama_host=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
+        )
+        self.qdrant_memory = QdrantMemory(_qcfg)
 
     def _get_provider(self, provider: str):
         return self._providers[_normalize_provider(provider)] if provider in self._providers else None

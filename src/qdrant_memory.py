@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ class QdrantMemoryConfig:
     embedding_model: str = "qwen3-embedding:8b"
     embedding_dim: int = 4096
     ollama_host: str = "http://localhost:11434"
-    user_id: str = "tsunamayo7"
+    user_id: str = os.environ.get("HELIX_USER_ID", "default")
     top_k: int = 5
     score_threshold: float = 0.3
 

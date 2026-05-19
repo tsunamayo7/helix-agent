@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-DEFAULT_VISION_MODEL = "qwen3-vl:32b"
+DEFAULT_VISION_MODEL = "qwen3.6:27b"
 
 
 class VisionAnalyzer:

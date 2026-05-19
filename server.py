@@ -780,5 +780,21 @@ async def code_review(
     return result.to_dict()
 
 
+@mcp.tool()
+async def x_search(query: str, max_results: int = 5) -> dict:
+    """Search X (Twitter) posts in real-time via X Premium+ subscription.
+
+    Uses Hermes Agent x_search with xAI OAuth. Zero additional cost.
+    Ideal for: tech trends, company research, community sentiment, OSS promotion.
+
+    Args:
+        query: Natural language search query
+        max_results: Number of results (default 5)
+    """
+    from src.x_search import search_x as _search
+
+    return await _search(query, max_results)
+
+
 if __name__ == "__main__":
     mcp.run()

@@ -32,3 +32,7 @@ logs/
 
 # uv
 uv.lock
+
+# Personal infrastructure (P0 security)
+config/environment_manifest.yaml
+config/environment_manifest*.yaml

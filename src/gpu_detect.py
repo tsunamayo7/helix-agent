@@ -72,7 +72,7 @@ STRATEGIES = {
     },
     "vision": {
         "description": "Image/screenshot analysis.",
-        "prefer": ["qwen3-vl:32b", "gemma4:e4b"],
+        "prefer": ["qwen3.6:27b", "gemma4:e4b"],
     },
 }
 
@@ -106,7 +106,7 @@ MODEL_CAPABILITIES = {
         "vram_gb": 20,
         "speed": "moderate",
     },
-    "qwen3-vl:32b": {
+    "qwen3.6:27b": {
         "good": ["vision"],
         "ok": ["reasoning"],
         "weak": ["react", "critique"],
@@ -139,13 +139,13 @@ MODEL_TIERS = {
         "code_gen": "gemma4:e4b", "search": "gemma4-agent-coder-v4:latest",
     },
     (20, 48): {
-        "vision": "qwen3-vl:32b", "text": "gemma4-agent-coder-v4:latest",
+        "vision": "qwen3.6:27b", "text": "gemma4-agent-coder-v4:latest",
         "review": "gemma4-agent-coder-v4:latest", "reasoning": "gemma4:31b",
         "summarize": "gemma4:e2b", "translate": "gemma4:e2b", "classify": "gemma4:e2b",
         "code_gen": "gemma4-agent-coder-v4:latest", "search": "gemma4-agent-coder-v4:latest",
     },
     (48, 1000): {
-        "vision": "qwen3-vl:32b", "text": "gemma4-agent-coder-v4:latest",
+        "vision": "qwen3.6:27b", "text": "gemma4-agent-coder-v4:latest",
         "review": "gemma4-agent-coder-v4:latest", "reasoning": "qwen3.5:122b",
         "summarize": "gemma4:e2b", "translate": "gemma4:e2b", "classify": "gemma4:e2b",
         "code_gen": "gemma4-agent-coder-v4:latest", "search": "gemma4-agent-coder-v4:latest",

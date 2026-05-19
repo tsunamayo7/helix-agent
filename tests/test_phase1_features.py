@@ -248,7 +248,7 @@ class TestQdrantMemory:
         assert config.collection == "mem0_shared"
         assert config.embedding_model == "qwen3-embedding:8b"
         assert config.embedding_dim == 4096
-        assert config.user_id == "tsunamayo7"
+        assert config.user_id == "default"
 
     @pytest.mark.asyncio
     async def test_search_formats_results(self):
@@ -290,4 +290,4 @@ class TestQdrantMemory:
                 payload = call_args[1]["payload"] if "payload" in call_args[1] else call_args[0][1]
                 point = payload["points"][0]["payload"]
                 assert point["category"] == "design"
-                assert point["user_id"] == "tsunamayo7"
+                assert point["user_id"] == "default"
