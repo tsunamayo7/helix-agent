@@ -2,6 +2,8 @@
 
 **Cut Claude Code token usage 82-97% with local LLMs.**
 
+![Demo](demo.gif)
+
 [![CI](https://github.com/tsunamayo7/helix-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/tsunamayo7/helix-agent/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/tsunamayo7/helix-agent/actions/workflows/codeql.yml/badge.svg)](https://github.com/tsunamayo7/helix-agent/actions/workflows/codeql.yml)
 [![Tests](https://img.shields.io/badge/tests-367%20passing-brightgreen.svg)](#)
@@ -13,15 +15,11 @@
 
 ## The Problem
 
-Claude Code's Max plan 5-hour quota [can vanish in 19 minutes](https://www.macrumors.com/2026/03/26/claude-code-users-rapid-rate-limit-drain-bug/). Raw screenshots cost ~15,000 tokens. DOM snapshots cost ~114,000. Retry loops burn tokens infinitely with [no built-in detection](https://github.com/anthropics/claude-code/issues/41659). Your actual prompt? Less than 1% of total token spend.
-
-This is the [#1 pain point](https://github.com/anthropics/claude-code/issues/16157) for Claude Code users (666+ upvotes).
+Claude Code's Max plan quota [can vanish in 19 minutes](https://www.macrumors.com/2026/03/26/claude-code-users-rapid-rate-limit-drain-bug/). A single screenshot costs ~15,000 tokens; one DOM snapshot costs ~114,000. Retry loops burn tokens infinitely with [no built-in detection](https://github.com/anthropics/claude-code/issues/41659) -- the [#1 pain point](https://github.com/anthropics/claude-code/issues/16157) (666+ upvotes).
 
 ## The Solution
 
-helix-agent is an MCP server that compresses screenshots, DOM, and browser output through your local GPU before Claude sees them. It detects retry loops before they drain your quota. Routine tasks run on Ollama at $0 instead of Opus.
-
-Connect it to Claude Code and token savings happen automatically -- no workflow changes needed.
+helix-agent is an MCP server that compresses screenshots, DOM, and browser output through your local GPU before Claude sees them -- and detects retry loops before they drain your quota. Connect it to Claude Code and savings happen automatically; no workflow changes needed.
 
 ## Measured Results
 
@@ -34,6 +32,16 @@ Connect it to Claude Code and token savings happen automatically -- no workflow 
 | Routine tasks | Opus tokens ($$$) | Local LLM ($0) | **100%** |
 
 All compression runs on your local GPU via Ollama. Zero cloud API cost.
+
+## Before / After
+
+| | Without helix-agent | With helix-agent |
+|---|---|---|
+| Screenshot | 15,000 tokens raw image | 400 tokens structured text |
+| DOM snapshot | 114,000 tokens raw HTML | 500 tokens action summary |
+| Retry loop | Runs until quota dies | Stopped at 3rd repeat |
+| Routine task | Opus ($$$) | Local Ollama ($0) |
+| Cloud API cost | $50-200/month in waste | **$0** |
 
 ## Quick Start
 
@@ -59,6 +67,8 @@ Add to `~/.claude/settings.json`:
 
 Restart Claude Code. Done.
 
+> **$0 cloud cost.** All compression, retry detection, and delegation runs on your local GPU via Ollama. No API keys, no subscriptions, no metered billing. Your tokens stay on your machine.
+
 ## How It Works
 
 ```
@@ -74,18 +84,55 @@ Claude Code (Opus)
            +-- code_review -------- 4-layer LLM --> $0.20 total
 ```
 
+## Works Everywhere
+
+| Platform | GPU | Status |
+|---|---|---|
+| macOS (Apple Silicon) | Metal / M1-M4 | Tested daily |
+| Linux | NVIDIA CUDA | Primary dev environment |
+| Windows (WSL2) | NVIDIA CUDA | Supported via Ollama |
+| Windows (native) | NVIDIA CUDA | Supported via Ollama |
+| CPU-only | None | Works (slower, ~30s per compress) |
+
+Anywhere Ollama runs, helix-agent runs. 8GB VRAM minimum for GPU acceleration.
+
 ## Features
 
-- **Vision Compress** -- Screenshot to structured text via local vision LLM. 15,000 tokens to 400. Raw images auto-deleted from responses.
-- **DOM Compress** -- HTML/DOM to structured extract via local LLM. 114,000 tokens to 500. Forms, links, buttons, and action candidates preserved.
-- **Retry Guard** -- Detects identical tool calls before they loop. SHA1 fingerprints, sliding time window, sub-millisecond. No LLM needed.
+- **Vision Compress** -- Screenshot to structured text via local vision LLM. 15,000 tokens to 400.
+- **DOM Compress** -- HTML/DOM to structured extract via local LLM. 114,000 tokens to 500.
+- **Retry Guard** -- Detects identical tool calls before they loop. Sub-millisecond, no LLM needed.
 - **GPU Auto-Detection** -- Detects your GPU at startup, selects the optimal model from 8GB to 96GB+.
+
+<details>
+<summary>All 27 tools</summary>
+
 - **Browser Automation** -- Routes through agent-browser (Rust/CDP) with Playwright fallback. Native keyboard events fix React controlled components.
 - **4-Layer Code Review** -- gemma4 + Sonnet + Opus + Codex pipeline catches all issues at ~$0.20.
 - **Self-Evolving Memory** -- Reviews conversations every 5 turns, saves reusable skills as SKILL.md files. Gets smarter over time, all local.
 - **Parallel Tasks** -- Run multiple tasks simultaneously with 2-axis model routing (task type x input size).
 - **ReAct Agents** -- Local LLM delegation with tool access, sub-agents, background workers, and JSONL tracing.
-- **PathGuard Security** -- Path allowlists prevent delegated tools from accessing sensitive locations. Defends against [CVE-2025-59536](https://research.checkpoint.com/2026/rce-and-api-token-exfiltration-through-claude-code-project-files-cve-2025-59536/).
+
+</details>
+
+## Security: PathGuard
+
+MCP tools that delegate to local LLMs can be tricked into accessing sensitive files. PathGuard prevents this with strict path allowlists -- delegated tools can only read/write directories you explicitly permit.
+
+Defends against [CVE-2025-59536](https://research.checkpoint.com/2026/rce-and-api-token-exfiltration-through-claude-code-project-files-cve-2025-59536/) (RCE and API token exfiltration through Claude Code project files).
+
+```python
+# PathGuard blocks unauthorized access automatically
+HELIX_ALLOWED_PATHS=/home/user/projects,/tmp
+```
+
+## Real-World Usage
+
+helix-agent runs in production daily on the author's own Claude Code workflow:
+
+- **367 tests** passing (pytest, all Ollama calls mocked)
+- **17+ hour autonomous sessions** with retry guard preventing quota drain
+- **27 MCP tools** + 3 Resources + 3 Prompts -- full MCP spec coverage
+- Used to build [helix-pilot](https://github.com/tsunamayo7/helix-pilot), [helix-codex](https://github.com/tsunamayo7/claude-code-codex-agents), and itself (dogfooding)
 
 ## GPU Auto-Detection
 
