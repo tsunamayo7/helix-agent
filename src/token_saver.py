@@ -15,6 +15,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
+import sys
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -23,6 +25,13 @@ from typing import Any
 import httpx
 
 from .vision import VisionAnalyzer
+
+logger = logging.getLogger(__name__)
+
+# helix-common is a sibling directory; add it to sys.path if not already present
+_HELIX_COMMON = str(Path(__file__).parent.parent.parent / "helix-common")
+if _HELIX_COMMON not in sys.path:
+    sys.path.insert(0, _HELIX_COMMON)
 
 
 # --- Vision Compression ---------------------------------------------------
@@ -156,6 +165,11 @@ class TokenSaver:
         use_model = model or self.vision_model
 
         raw = await self.vision.analyze(image_base64, prompt=prompt, model=use_model)
+
+        # Fallback to Gemini API if Ollama is unavailable
+        if raw.startswith("Vision analysis unavailable:"):
+            logger.warning("Ollama failed, falling back to Gemini API")
+            raw = await _gemini_vision_fallback(image_base64, prompt)
 
         structured = _try_parse_json(raw)
 
@@ -358,6 +372,36 @@ def _try_parse_json(text: str) -> dict | None:
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for English."""
     return max(len(text) // 4, 1)
+
+
+async def _gemini_vision_fallback(image_base64: str, prompt: str) -> str:
+    """Call Gemini vision API as fallback when Ollama is unavailable.
+
+    Writes base64 image to a temp file, calls gemini_ocr(), then cleans up.
+    Returns the Gemini response text, or original error message on failure.
+    """
+    import tempfile
+    try:
+        from gemini_client import gemini_ocr  # added via sys.path at module load
+    except ImportError as e:
+        return f"Vision analysis unavailable: gemini_client import failed: {e}"
+
+    tmp = None
+    try:
+        raw_bytes = base64.b64decode(image_base64)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(raw_bytes)
+            tmp_path = tmp.name
+        result = await gemini_ocr(tmp_path)
+        text = result.get("full_text", "")
+        if not text:
+            return f"Vision analysis unavailable: Gemini OCR returned empty response"
+        return text
+    except Exception as e:
+        return f"Vision analysis unavailable: Gemini fallback failed: {e}"
+    finally:
+        if tmp is not None:
+            Path(tmp_path).unlink(missing_ok=True)
 
 
 async def _ollama_generate(
