@@ -117,6 +117,8 @@ class QdrantMemory:
         if metadata:
             payload.update(metadata)
 
+        self._append_canonical_log(point_id, coll, text, payload)
+
         upsert_payload = {
             "points": [
                 {
@@ -154,3 +156,22 @@ class QdrantMemory:
         }
         with open(spool_file, "a") as f:
             f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
+
+    @staticmethod
+    def _append_canonical_log(point_id: str, collection: str, text: str, payload: dict) -> None:
+        """全記憶書き込みを append-only JSONL に記録 (Qdrant 成功/失敗を問わず正本として保持)."""
+        import json as _json
+        from pathlib import Path as _Path
+        log_path = _Path.home() / ".claude" / "memory_events.jsonl"
+        entry = {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "point_id": point_id,
+            "collection": collection,
+            "text_preview": text[:200],
+            "metadata": {k: v for k, v in payload.items() if k != "data"},
+        }
+        try:
+            with open(log_path, "a") as f:
+                f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
