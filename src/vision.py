@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import os
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ class VisionAnalyzer:
 
     def __init__(
         self,
-        host: str = "http://localhost:11434",
+        host: str = os.environ.get("HELIX_OLLAMA_HOST", "http://localhost:11434"),
         model: str = DEFAULT_VISION_MODEL,
         timeout: float = 60.0,
     ):

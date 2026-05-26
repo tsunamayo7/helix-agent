@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -23,7 +24,7 @@ class AgentConfig:
     max_output_tokens: int = 4096
     result_summary: bool = True
 
-    ollama_host: str = "http://localhost:11434"
+    ollama_host: str = os.environ.get("HELIX_OLLAMA_HOST", "http://localhost:11434")
     ollama_timeout: float = 120.0
 
     codex_model: str = "gpt-5.4"

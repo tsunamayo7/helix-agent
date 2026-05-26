@@ -14,14 +14,15 @@ from .ollama_client import OllamaClient
 
 @dataclass
 class QdrantMemoryConfig:
-    qdrant_url: str = "http://localhost:6333"
+    qdrant_url: str = os.environ.get("QDRANT_URL", "http://localhost:6333")
     collection: str = "mem0_shared"
     embedding_model: str = "qwen3-embedding:8b"
     embedding_dim: int = 4096
-    ollama_host: str = "http://localhost:11434"
+    ollama_host: str = os.environ.get("HELIX_OLLAMA_HOST", os.environ.get("OLLAMA_EMBED_HOST", "http://tsunamayo-1:11434"))
     user_id: str = os.environ.get("HELIX_USER_ID", "default")
     top_k: int = 5
     score_threshold: float = 0.3
+    api_key: str = os.environ.get("QDRANT_API_KEY", "").strip()
 
 
 class QdrantMemory:
@@ -30,6 +31,9 @@ class QdrantMemory:
     def __init__(self, config: QdrantMemoryConfig | None = None):
         self.config = config or QdrantMemoryConfig()
         self._ollama = OllamaClient(host=self.config.ollama_host)
+        self._headers: dict[str, str] = {}
+        if self.config.api_key:
+            self._headers["api-key"] = self.config.api_key
 
     async def _embed(self, text: str) -> list[float]:
         embeddings = await self._ollama.embeddings(self.config.embedding_model, text)
@@ -39,7 +43,7 @@ class QdrantMemory:
 
     async def _qdrant_post(self, path: str, payload: dict, timeout: float = 15.0, method: str = "POST") -> dict:
         url = f"{self.config.qdrant_url}{path}"
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, headers=self._headers) as client:
             if method == "PUT":
                 r = await client.put(url, json=payload)
             else:
@@ -49,7 +53,7 @@ class QdrantMemory:
 
     async def is_available(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=5.0, headers=self._headers) as client:
                 r = await client.get(f"{self.config.qdrant_url}/collections/{self.config.collection}")
                 return r.status_code == 200
         except (httpx.ConnectError, httpx.TimeoutException):
@@ -123,10 +127,30 @@ class QdrantMemory:
             ]
         }
 
-        await self._qdrant_post(
-            f"/collections/{coll}/points",
-            upsert_payload,
-            timeout=15.0,
-            method="PUT",
-        )
+        try:
+            await self._qdrant_post(
+                f"/collections/{coll}/points",
+                upsert_payload,
+                timeout=15.0,
+                method="PUT",
+            )
+        except Exception:
+            self._spool_to_jsonl(text, payload, coll, vector)
         return point_id
+
+    def _spool_to_jsonl(self, text: str, payload: dict, collection: str, vector: list[float]) -> None:
+        """Qdrant 接続失敗時にローカル JSONL に蓄積 (後で replay)."""
+        import json as _json
+        from pathlib import Path as _Path
+        spool_dir = _Path.home() / ".claude" / "qdrant_spool"
+        spool_dir.mkdir(parents=True, exist_ok=True)
+        spool_file = spool_dir / f"spool_{collection}.jsonl"
+        entry = {
+            "collection": collection,
+            "payload": payload,
+            "vector_dim": len(vector),
+            "text_preview": text[:200],
+            "spooled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        with open(spool_file, "a") as f:
+            f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
