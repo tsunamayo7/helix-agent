@@ -66,6 +66,7 @@ class QdrantMemory:
         source: str | None = None,
         category: str | None = None,
         collection: str | None = None,
+        hybrid: bool = False,
     ) -> list[dict]:
         vector = await self._embed(query)
         k = top_k or self.config.top_k
@@ -79,21 +80,85 @@ class QdrantMemory:
         if category:
             must_filters.append({"key": "category", "match": {"value": category}})
 
+        qdrant_filter = {"must": must_filters}
+
+        if hybrid:
+            result = await self._hybrid_query(vector, k, coll, qdrant_filter)
+        else:
+            result = await self._dense_search(vector, k, coll, qdrant_filter)
+
+        return self._parse_search_results(result, hybrid=hybrid)
+
+    async def _dense_search(
+        self,
+        vector: list[float],
+        limit: int,
+        collection: str,
+        qdrant_filter: dict,
+    ) -> dict:
+        """既存の dense vector 検索 (POST /points/search)."""
         payload = {
             "vector": vector,
-            "limit": k,
+            "limit": limit,
             "score_threshold": self.config.score_threshold,
-            "filter": {"must": must_filters},
+            "filter": qdrant_filter,
             "with_payload": True,
         }
-
-        result = await self._qdrant_post(
-            f"/collections/{coll}/points/search",
+        return await self._qdrant_post(
+            f"/collections/{collection}/points/search",
             payload,
         )
 
+    async def _hybrid_query(
+        self,
+        vector: list[float],
+        limit: int,
+        collection: str,
+        qdrant_filter: dict,
+    ) -> dict:
+        """Hybrid search via Query API (POST /points/query).
+
+        Phase 1: dense-only prefetch + RRF fusion.
+        将来 sparse vector を追加する場合は prefetch リストに
+        {"query": sparse_vector, "using": "sparse", "limit": ...} を追加する。
+        """
+        prefetch = [
+            {
+                "query": vector,
+                "using": "dense",
+                "limit": limit * 3,
+                "filter": qdrant_filter,
+            },
+            # Phase 2: sparse vector prefetch をここに追加
+            # {"query": {"indices": [...], "values": [...]}, "using": "sparse", "limit": limit * 3, "filter": qdrant_filter},
+        ]
+
+        payload = {
+            "prefetch": prefetch,
+            "query": {"fusion": "rrf"},
+            "limit": limit,
+            "with_payload": True,
+            "filter": qdrant_filter,
+        }
+        return await self._qdrant_post(
+            f"/collections/{collection}/points/query",
+            payload,
+        )
+
+    @staticmethod
+    def _parse_search_results(result: dict, *, hybrid: bool = False) -> list[dict]:
+        """search / query 両 API のレスポンスを統一フォーマットに変換."""
+        # Query API は "result" 内に "points" キー、Search API は "result" が直接リスト
+        raw = result.get("result", [])
+        if hybrid and isinstance(raw, dict):
+            points = raw.get("points", [])
+        elif isinstance(raw, list):
+            points = raw
+        else:
+            points = []
+
         hits = []
-        for point in result.get("result", []):
+        for point in points:
             p = point.get("payload", {})
             hits.append({
                 "text": p.get("data", p.get("text", p.get("memory", ""))),
