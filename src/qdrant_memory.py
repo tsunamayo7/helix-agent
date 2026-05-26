@@ -117,8 +117,6 @@ class QdrantMemory:
         if metadata:
             payload.update(metadata)
 
-        self._append_canonical_log(point_id, coll, text, payload)
-
         upsert_payload = {
             "points": [
                 {
@@ -136,9 +134,12 @@ class QdrantMemory:
                 timeout=15.0,
                 method="PUT",
             )
+            self._append_canonical_log(point_id, coll, text, payload, status="stored")
+            return point_id
         except Exception:
             self._spool_to_jsonl(text, payload, coll, vector)
-        return point_id
+            self._append_canonical_log(point_id, coll, text, payload, status="spooled")
+            return f"spool:{point_id}"
 
     def _spool_to_jsonl(self, text: str, payload: dict, collection: str, vector: list[float]) -> None:
         """Qdrant 接続失敗時にローカル JSONL に蓄積 (後で replay)."""
@@ -151,23 +152,26 @@ class QdrantMemory:
             "collection": collection,
             "payload": payload,
             "vector_dim": len(vector),
-            "text_preview": text[:200],
+            "point_id": point_id,
+            "data_preview": text[:500],
             "spooled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         with open(spool_file, "a") as f:
             f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
 
     @staticmethod
-    def _append_canonical_log(point_id: str, collection: str, text: str, payload: dict) -> None:
+    def _append_canonical_log(point_id: str, collection: str, text: str, payload: dict, status: str = "pending") -> None:
         """全記憶書き込みを append-only JSONL に記録 (Qdrant 成功/失敗を問わず正本として保持)."""
         import json as _json
         from pathlib import Path as _Path
         log_path = _Path.home() / ".claude" / "memory_events.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         entry = {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "point_id": point_id,
             "collection": collection,
-            "text_preview": text[:200],
+            "data": text,
+            "status": status,
             "metadata": {k: v for k, v in payload.items() if k != "data"},
         }
         try:

@@ -6,7 +6,11 @@ import os
 import pytest
 from unittest.mock import AsyncMock, patch
 
+from pathlib import Path
+
 from src.pathguard import PathGuard
+
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 from src.builtin_tools import (
     _tool_calculate,
     _tool_list_files,
@@ -25,49 +29,68 @@ from src.builtin_tools import (
 class TestPathGuard:
     def test_allowed_path(self):
         guard = PathGuard()
-        resolved = guard.validate("C:/Development/tools/helix-agent/README.md")
+        readme = str(Path(_PROJECT_ROOT) / "README.md")
+        resolved = guard.validate(readme)
         assert resolved.name == "README.md"
 
     def test_blocked_outside_allowlist(self):
         guard = PathGuard()
+        outside = "C:/Windows/System32/config" if os.name == "nt" else "/tmp/evil_path"
         with pytest.raises(PermissionError, match="outside allowed"):
-            guard.validate("C:/Windows/System32/config")
+            guard.validate(outside)
 
     def test_blocked_env_file(self):
         guard = PathGuard()
+        env_path = str(Path(_PROJECT_ROOT) / ".env")
         with pytest.raises(PermissionError, match="Sensitive file"):
-            guard.validate("C:/Development/.env")
+            guard.validate(env_path)
 
     def test_blocked_ssh_key(self):
         guard = PathGuard()
+        ssh_path = str(Path(_PROJECT_ROOT) / "id_rsa")
         with pytest.raises(PermissionError, match="Sensitive file"):
-            guard.validate("C:/Development/id_rsa")
+            guard.validate(ssh_path)
 
     def test_blocked_pem_extension(self):
         guard = PathGuard()
+        pem_path = str(Path(_PROJECT_ROOT) / "cert.pem")
         with pytest.raises(PermissionError, match="Sensitive file type"):
-            guard.validate("C:/Development/cert.pem")
+            guard.validate(pem_path)
 
     def test_blocked_credentials(self):
         guard = PathGuard()
+        cred_path = str(Path(_PROJECT_ROOT) / "credentials.json")
         with pytest.raises(PermissionError, match="Sensitive file"):
-            guard.validate("C:/Development/credentials.json")
+            guard.validate(cred_path)
 
     def test_custom_roots(self):
-        from pathlib import Path
-        guard = PathGuard(allowed_roots=[Path("C:/tmp")])
+        guard = PathGuard(allowed_roots=[Path("/tmp/custom_root")])
         with pytest.raises(PermissionError):
-            guard.validate("C:/Development/test.txt")
+            guard.validate(_PROJECT_ROOT + "/test.txt")
 
     def test_traversal_attack(self):
         guard = PathGuard()
+        traversal = str(Path(_PROJECT_ROOT) / "../../../../../../etc/passwd")
         with pytest.raises(PermissionError):
-            guard.validate("C:/Development/../../Windows/System32/config")
+            guard.validate(traversal)
 
     def test_blocked_access_json(self):
         guard = PathGuard()
+        access_path = str(Path(_PROJECT_ROOT) / "access.json")
         with pytest.raises(PermissionError, match="Sensitive file"):
-            guard.validate("C:/Development/access.json")
+            guard.validate(access_path)
+
+    def test_blocked_ssh_directory(self):
+        guard = PathGuard()
+        ssh_config = str(Path(_PROJECT_ROOT) / ".ssh" / "config")
+        with pytest.raises(PermissionError, match="Sensitive file"):
+            guard.validate(ssh_config)
+
+    def test_blocked_gnupg_directory(self):
+        guard = PathGuard()
+        gpg_key = str(Path(_PROJECT_ROOT) / ".gnupg" / "pubring.kbx")
+        with pytest.raises(PermissionError, match="Sensitive file"):
+            guard.validate(gpg_key)
 
 
 # --- Tool tests ---
@@ -91,17 +114,18 @@ class TestCalculateTool:
 class TestReadFileTool:
     @pytest.mark.asyncio
     async def test_read_existing_file(self):
-        result = await _tool_read_file("C:/Development/tools/helix-agent/README.md")
+        result = await _tool_read_file(str(Path(_PROJECT_ROOT) / "README.md"))
         assert "helix-agent" in result
 
     @pytest.mark.asyncio
     async def test_read_nonexistent(self):
-        result = await _tool_read_file("C:/Development/tools/helix-agent/nonexistent.txt")
+        result = await _tool_read_file(str(Path(_PROJECT_ROOT) / "nonexistent.txt"))
         assert "Error" in result
 
     @pytest.mark.asyncio
     async def test_read_blocked_path(self):
-        result = await _tool_read_file("C:/Windows/System32/config/SAM")
+        blocked = "C:/Windows/System32/config/SAM" if os.name == "nt" else "/etc/shadow"
+        result = await _tool_read_file(blocked)
         assert "Error" in result or "denied" in result
 
 
@@ -129,18 +153,20 @@ class TestListFilesTool:
     @pytest.mark.asyncio
     @pytest.mark.skipif(os.environ.get("CI") == "true", reason="Local path not available in CI")
     async def test_list_directory(self):
-        result = await _tool_list_files("C:/Development/tools/helix-agent")
+        result = await _tool_list_files(_PROJECT_ROOT)
         assert "README.md" in result
         assert "src" in result
 
     @pytest.mark.asyncio
     async def test_list_nonexistent(self):
-        result = await _tool_list_files("C:/Development/nonexistent_dir_xyz")
+        nonexistent = str(Path(_PROJECT_ROOT) / "nonexistent_dir_xyz")
+        result = await _tool_list_files(nonexistent)
         assert "Error" in result
 
     @pytest.mark.asyncio
     async def test_list_blocked_path(self):
-        result = await _tool_list_files("C:/Windows/System32")
+        blocked = "C:/Windows/System32" if os.name == "nt" else "/etc"
+        result = await _tool_list_files(blocked)
         assert "Error" in result or "denied" in result
 
 
@@ -149,7 +175,7 @@ class TestSearchInFileTool:
     @pytest.mark.skipif(os.environ.get("CI") == "true", reason="Local path not available in CI")
     async def test_search_found(self):
         params = json.dumps({
-            "path": "C:/Development/tools/helix-agent/README.md",
+            "path": str(Path(_PROJECT_ROOT) / "README.md"),
             "pattern": "helix-agent"
         })
         result = await _tool_search_in_file(params)
@@ -159,7 +185,7 @@ class TestSearchInFileTool:
     @pytest.mark.skipif(os.environ.get("CI") == "true", reason="Local path not available in CI")
     async def test_search_not_found(self):
         params = json.dumps({
-            "path": "C:/Development/tools/helix-agent/README.md",
+            "path": str(Path(_PROJECT_ROOT) / "README.md"),
             "pattern": "zzz_nonexistent_pattern_zzz"
         })
         result = await _tool_search_in_file(params)

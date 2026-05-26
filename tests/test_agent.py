@@ -33,8 +33,8 @@ class TestAgentConfig:
 class TestHelixAgent:
     def test_init_default(self):
         agent = HelixAgent()
-        assert agent.config.ollama_host == "http://localhost:11434"
-        assert agent.client.host == "http://localhost:11434"
+        import os as _os; expected = _os.environ.get("HELIX_OLLAMA_HOST", "http://localhost:11434"); assert agent.config.ollama_host == expected
+        import os as _os2; assert agent.client.host == _os2.environ.get("HELIX_OLLAMA_HOST", "http://localhost:11434")
 
     def test_init_custom_config(self):
         config = AgentConfig(default_provider="codex", default_mode="creative")

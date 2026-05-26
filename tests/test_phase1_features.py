@@ -244,7 +244,7 @@ class TestStreamingReactLoop:
 class TestQdrantMemory:
     def test_config_defaults(self):
         config = QdrantMemoryConfig()
-        assert config.qdrant_url == "http://localhost:6333"
+        import os as _os; assert config.qdrant_url == _os.environ.get("QDRANT_URL", "http://localhost:6333")
         assert config.collection == "mem0_shared"
         assert config.embedding_model == "qwen3-embedding:8b"
         assert config.embedding_dim == 4096

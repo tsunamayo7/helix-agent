@@ -13,7 +13,11 @@ import sys
 
 import pytest
 
-_has_tkinter = importlib.util.find_spec("tkinter") is not None
+try:
+    import _tkinter  # noqa: F401
+    _has_tkinter = True
+except ImportError:
+    _has_tkinter = False
 pytestmark = pytest.mark.skipif(not _has_tkinter, reason="tkinter not available")
 
 
