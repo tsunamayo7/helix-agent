@@ -35,9 +35,15 @@ def search_qdrant(query: str, top_k: int = TOP_K) -> list[dict]:
         if not vector:
             return []
 
-        # Search
+        # Search — support both unnamed and named vector collections
+        try:
+            info = httpx.get(f"{QDRANT_URL}/collections/{COLLECTION}", timeout=5).json()
+            has_named = bool(info.get("result", {}).get("config", {}).get("params", {}).get("sparse_vectors"))
+        except Exception:
+            has_named = False
+        vec_payload = {"name": "dense", "vector": vector} if has_named else vector
         resp = httpx.post(f"{QDRANT_URL}/collections/{COLLECTION}/points/search", json={
-            "vector": vector,
+            "vector": vec_payload,
             "limit": top_k,
             "with_payload": True,
         }, timeout=10)

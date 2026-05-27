@@ -249,6 +249,7 @@ class TestHybridQueryStructure:
 
         memory._embed = mock_embed
         memory._hybrid_query = mock_hybrid
+        memory._sparse_field_cache["test_collection"] = True
 
         await memory.search("テスト", hybrid=True)
         assert call_args["query_text"] == "テスト"
@@ -333,8 +334,31 @@ class TestAddWithSparseVector:
 
         points = captured_payload.get("points", [])
         vector = points[0]["vector"]
-        # Should be a plain list (unnamed), not a dict
+        # No sparse field → unnamed vector (plain list)
         assert isinstance(vector, list)
+
+    @pytest.mark.asyncio
+    async def test_add_short_text_named_collection_uses_dense_only(self, memory: QdrantMemory):
+        """Short text on sparse-enabled collection still uses named dense vector."""
+        captured_payload = {}
+
+        async def mock_embed(text):
+            return [0.1] * 4096
+
+        async def mock_post(path: str, payload: dict, **kwargs):
+            captured_payload.update(payload)
+            return {"result": {"status": "ok"}}
+
+        memory._embed = mock_embed
+        memory._qdrant_post = mock_post
+        memory._sparse_field_cache["test_collection"] = True
+
+        await memory.add("a")
+
+        vector = captured_payload["points"][0]["vector"]
+        assert isinstance(vector, dict)
+        assert "dense" in vector
+        assert "sparse" not in vector
 
 
 # ── ensure_sparse_field tests ──

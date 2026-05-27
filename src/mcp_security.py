@@ -195,12 +195,11 @@ def _check_param_escalation(tool_name: str, params: dict[str, Any]) -> RiskLevel
 
     Returns the escalated RiskLevel, or None if no escalation applies.
     """
-    # computer_use: screenshot-only is MEDIUM, actions are HIGH
+    # computer_use: analyzed screenshot is MEDIUM, raw screenshot stays HIGH
     if tool_name == "computer_use":
         action = params.get("action", "")
-        if action == "screenshot":
+        if action == "screenshot" and params.get("analyze", False):
             return RiskLevel.MEDIUM
-        # All other actions (click, type, scroll, navigate) remain HIGH
         return None
 
     # write_file: writing to sensitive paths escalates to HIGH

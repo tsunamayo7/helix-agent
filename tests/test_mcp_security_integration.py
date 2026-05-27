@@ -77,11 +77,16 @@ class TestCheckToolPermission:
 class TestParameterEscalation:
     """Tests for parameter-aware risk escalation rules."""
 
-    def test_computer_use_screenshot_is_medium(self):
-        """computer_use with action=screenshot downgrades to MEDIUM."""
-        allowed, reason = check_tool_permission("computer_use", {"action": "screenshot"})
+    def test_computer_use_screenshot_analyzed_is_medium(self):
+        """computer_use with action=screenshot + analyze=True downgrades to MEDIUM."""
+        allowed, reason = check_tool_permission("computer_use", {"action": "screenshot", "analyze": True})
         assert allowed is True
         assert "audit" in reason
+
+    def test_computer_use_screenshot_raw_is_high(self):
+        """computer_use with action=screenshot without analyze stays HIGH."""
+        allowed, reason = check_tool_permission("computer_use", {"action": "screenshot"})
+        assert allowed is False
 
     def test_computer_use_click_remains_high(self):
         """computer_use with action=click stays HIGH."""

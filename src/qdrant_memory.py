@@ -170,7 +170,7 @@ class QdrantMemory:
 
         qdrant_filter = {"must": must_filters}
 
-        if hybrid:
+        if hybrid and await self._has_sparse_field(coll):
             result = await self._hybrid_query(vector, k, coll, qdrant_filter, query_text=query)
         else:
             result = await self._dense_search(vector, k, coll, qdrant_filter)
@@ -280,15 +280,14 @@ class QdrantMemory:
         if metadata:
             payload.update(metadata)
 
-        # Build vector: use named vectors only if collection supports sparse
+        # Build vector: use named vectors if collection has sparse field
         has_sparse = await self._has_sparse_field(coll)
-        sparse_indices, sparse_values = self._sparse_encode(text) if has_sparse else ([], [])
         point_vectors: dict | list[float]
-        if has_sparse and sparse_indices:
-            point_vectors = {
-                "dense": vector,
-                "sparse": {"indices": sparse_indices, "values": sparse_values},
-            }
+        if has_sparse:
+            sparse_indices, sparse_values = self._sparse_encode(text)
+            point_vectors = {"dense": vector}
+            if sparse_indices:
+                point_vectors["sparse"] = {"indices": sparse_indices, "values": sparse_values}
         else:
             point_vectors = vector
 
