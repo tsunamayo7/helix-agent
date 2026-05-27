@@ -2,7 +2,7 @@
 
 5分毎に launchd から起動。
 将来的には $CMEM (claude-mem) の操作ログを
-リモート Qdrant (tsunamayo-1:6333) に同期する。
+リモート Qdrant (remote server:6333) に同期する。
 
 現在はスタブ実装:
   - $CMEM DB の存在と基本統計を確認
@@ -34,7 +34,7 @@ STATE_FILE = HELIX_DIR / "cmem_bridge_mac" / "state.json"
 LOG_DIR = Path.home() / ".claude" / "logs"
 
 CMEM_DB = Path.home() / ".claude-mem" / "claude-mem.db"
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://tsunamayo-1:6333")
+QDRANT_URL = os.environ.get("QDRANT_URL", os.environ.get("QDRANT_URL", "http://localhost:6333"))
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
 COLLECTION = "mem0_shared"
 

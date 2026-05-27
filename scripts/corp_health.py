@@ -13,10 +13,10 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://tsunamayo-1:6333")
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
-OLLAMA_HOST = os.environ.get("HELIX_OLLAMA_HOST", "http://tsunamayo-1:11434")
-HEALTH_URL = "http://tsunamayo-1:8800"
+OLLAMA_HOST = os.environ.get("HELIX_OLLAMA_HOST", "http://localhost:11434")
+HEALTH_URL = os.environ.get("HELIX_HEALTH_URL", "http://localhost:8800")
 COLLECTIONS = ["dept_build", "dept_research", "dept_design", "dept_qa", "dept_hr", "mem0_shared"]
 
 

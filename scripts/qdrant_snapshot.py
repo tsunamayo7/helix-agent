@@ -13,7 +13,7 @@ import os
 import urllib.request
 from datetime import datetime
 
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://tsunamayo-1:6333")
+QDRANT_URL = os.environ.get("QDRANT_URL", os.environ.get("QDRANT_URL", "http://localhost:6333"))
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
 HEADERS = {"api-key": QDRANT_API_KEY, "Content-Type": "application/json"}
 COLLECTIONS = ["dept_build", "dept_research", "dept_design", "dept_qa", "dept_hr", "mem0_shared"]

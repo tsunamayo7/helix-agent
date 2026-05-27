@@ -19,8 +19,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 MEMORY_DIR = Path.home() / ".claude" / "projects" / "Development" / "memory"
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://tsunamayo-1:6333")
-OLLAMA_HOST = os.environ.get("HELIX_OLLAMA_HOST", "http://tsunamayo-1:11434")
+QDRANT_URL = os.environ.get("QDRANT_URL", os.environ.get("QDRANT_URL", "http://localhost:6333"))
+OLLAMA_HOST = os.environ.get("HELIX_OLLAMA_HOST", os.environ.get("HELIX_OLLAMA_HOST", "http://localhost:11434"))
 
 DEPT_MAP = {
     "project": "dept_build",

@@ -2,11 +2,11 @@
 
 毎日 3:15 に launchd から起動。
 Mac CEO Node 上の memory/ ディレクトリと、
-リモート Qdrant (tsunamayo-1) の整合性を検証。
+リモート Qdrant (remote server) の整合性を検証。
 
 Windows 版 (integrity_check.py) との差分:
   - memory/ パスが macOS パス
-  - Qdrant はリモート (tsunamayo-1:6333)
+  - Qdrant はリモート (remote server:6333)
   - LightRAG チェックは省略 (Mac 未搭載)
   - $CMEM は Mac 上に存在すれば検証
 
@@ -37,7 +37,7 @@ MEMORY_DIR = Path.home() / ".claude" / "projects" / "Development" / "memory"
 CMEM_DB = Path.home() / ".claude-mem" / "claude-mem.db"
 
 # リモート Qdrant (環境変数 or デフォルト)
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://tsunamayo-1:6333")
+QDRANT_URL = os.environ.get("QDRANT_URL", os.environ.get("QDRANT_URL", "http://localhost:6333"))
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
 COLLECTION = "mem0_shared"
 

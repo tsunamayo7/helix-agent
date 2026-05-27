@@ -21,7 +21,7 @@ class QdrantMemoryConfig:
     collection: str = "mem0_shared"
     embedding_model: str = "qwen3-embedding:8b"
     embedding_dim: int = 4096
-    ollama_host: str = os.environ.get("HELIX_OLLAMA_HOST", os.environ.get("OLLAMA_EMBED_HOST", "http://tsunamayo-1:11434"))
+    ollama_host: str = os.environ.get("HELIX_OLLAMA_HOST", os.environ.get("OLLAMA_EMBED_HOST", "http://localhost:11434"))
     user_id: str = os.environ.get("HELIX_USER_ID", "default")
     top_k: int = 5
     score_threshold: float = 0.3

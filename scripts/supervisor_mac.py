@@ -1,7 +1,7 @@
 """Mac Supervisor — リモートサービス監視 (CEO Node).
 
 3分毎に launchd から起動。
-Windows GPU Server (tsunamayo-1) 上の Qdrant / Ollama / Health Server の
+リモート GPU Server 上の Qdrant / Ollama / Health Server の
 到達性をチェックし、失敗時はログ記録 + Discord 通知。
 
 Mac はサービスを再起動する権限を持たない (Windows 側が自律起動)。
@@ -33,10 +33,10 @@ LOG_DIR = Path.home() / ".claude" / "logs"
 WEBHOOK_SCRIPT = Path.home() / ".claude" / "hooks" / "discord_webhook_fallback.py"
 
 # 環境変数 (plist で定義)
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://tsunamayo-1:6333")
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
-OLLAMA_HOST = os.environ.get("HELIX_OLLAMA_HOST", "http://tsunamayo-1:11434")
-HEALTH_URL = os.environ.get("HELIX_HEALTH_URL", "http://tsunamayo-1:8800")
+OLLAMA_HOST = os.environ.get("HELIX_OLLAMA_HOST", "http://localhost:11434")
+HEALTH_URL = os.environ.get("HELIX_HEALTH_URL", "http://localhost:8800")
 
 # Mac ローカル Ollama
 LOCAL_OLLAMA = "http://localhost:11434"
@@ -45,31 +45,31 @@ LOCAL_OLLAMA = "http://localhost:11434"
 REMOTE_SERVICES = {
     "qdrant": {
         "url": f"{QDRANT_URL}/collections",
-        "description": "Qdrant Vector DB (tsunamayo-1:6333)",
+        "description": "Qdrant Vector DB",
         "critical": True,
         "timeout": 5,
     },
     "ollama_remote": {
         "url": f"{OLLAMA_HOST}/api/tags",
-        "description": "Ollama Remote (tsunamayo-1:11434)",
+        "description": "Ollama Remote",
         "critical": True,
         "timeout": 5,
     },
     "health_server": {
         "url": f"{HEALTH_URL}/health",
-        "description": "Health Server (tsunamayo-1:8800)",
+        "description": "Health Server",
         "critical": False,
         "timeout": 5,
     },
     "qdrant_memory": {
-        "url": "http://tsunamayo-1:8080/health",
-        "description": "Qdrant Memory HTTP (tsunamayo-1:8080)",
+        "url": os.environ.get("HELIX_QDRANT_MEMORY_URL", "http://localhost:8080") + "/health",
+        "description": "Qdrant Memory HTTP API",
         "critical": False,
         "timeout": 5,
     },
     "translate": {
-        "url": "http://tsunamayo-1:8787/health",
-        "description": "Translate API (tsunamayo-1:8787)",
+        "url": os.environ.get("HELIX_TRANSLATE_URL", "http://localhost:8787") + "/health",
+        "description": "Translate API",
         "critical": False,
         "timeout": 5,
     },
@@ -284,7 +284,7 @@ def show_status():
             pass
 
     # 現在のサービス状態をライブチェック
-    print("\n=== リモートサービス (tsunamayo-1) ===")
+    print("\n=== リモートサービス ===")
     for name, config in REMOTE_SERVICES.items():
         check = check_service(name, config)
         status = "[OK]" if check["status"] == "ok" else f"[NG] {check.get('error', check['status'])}"
