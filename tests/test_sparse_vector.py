@@ -181,6 +181,7 @@ class TestHybridQueryStructure:
             return {"result": {"points": []}}
 
         memory._qdrant_post = mock_post
+        memory._sparse_field_cache["test_collection"] = True
 
         dense_vector = [0.1] * 4096
         qdrant_filter = {"must": [{"key": "user_id", "match": {"value": "test"}}]}
@@ -220,6 +221,7 @@ class TestHybridQueryStructure:
             return {"result": {"points": []}}
 
         memory._qdrant_post = mock_post
+        memory._sparse_field_cache["test_collection"] = True
 
         await memory._hybrid_query(
             vector=[0.1] * 4096,
@@ -295,6 +297,7 @@ class TestAddWithSparseVector:
 
         memory._embed = mock_embed
         memory._qdrant_post = mock_post
+        memory._sparse_field_cache["test_collection"] = True
 
         await memory.add("ハイブリッド検索のテストデータ")
 

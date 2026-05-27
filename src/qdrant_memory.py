@@ -39,6 +39,15 @@ class QdrantMemory:
         self._headers: dict[str, str] = {}
         if self.config.api_key:
             self._headers["api-key"] = self.config.api_key
+        self._sparse_field_cache: dict[str, bool] = {}
+
+    async def _has_sparse_field(self, collection: str) -> bool:
+        """Check if collection has sparse vector field (cached per session)."""
+        if collection in self._sparse_field_cache:
+            return self._sparse_field_cache[collection]
+        result = await self.ensure_sparse_field(collection)
+        self._sparse_field_cache[collection] = result
+        return result
 
     async def _embed(self, text: str) -> list[float]:
         embeddings = await self._ollama.embeddings(self.config.embedding_model, text)
@@ -82,9 +91,11 @@ class QdrantMemory:
         return (indices, values)
 
     async def ensure_sparse_field(self, collection: str | None = None) -> bool:
-        """Qdrant コレクションに sparse vector field 'sparse' を追加 (冪等).
+        """Check whether the collection has a sparse vector field 'sparse'.
 
-        既に存在する場合はスキップ。PUT /collections/{name}/vectors で追加。
+        Returns True if the field already exists. Qdrant does NOT support
+        adding sparse vectors to an existing collection via API — use
+        scripts/migrate_sparse.py to recreate the collection with sparse support.
         """
         coll = collection or self.config.collection
         # まずコレクション情報を取得して sparse field の有無を確認
@@ -199,17 +210,16 @@ class QdrantMemory:
         Phase 2: dense + sparse prefetch → RRF fusion.
         sparse vector は文字 N-gram ベースで生成。
         """
-        prefetch = [
-            {
-                "query": vector,
-                "using": "dense",
-                "limit": limit * 3,
-                "filter": qdrant_filter,
-            },
-        ]
-
-        # Phase 2: sparse vector prefetch
-        if query_text:
+        has_sparse = await self._has_sparse_field(collection)
+        dense_prefetch: dict = {
+            "query": vector,
+            "limit": limit * 3,
+            "filter": qdrant_filter,
+        }
+        if has_sparse:
+            dense_prefetch["using"] = "dense"
+        prefetch = [dense_prefetch]
+        if has_sparse and query_text:
             indices, values = self._sparse_encode(query_text)
             if indices:
                 prefetch.append({
@@ -268,16 +278,16 @@ class QdrantMemory:
         if metadata:
             payload.update(metadata)
 
-        # Build vector dict: dense (unnamed for backward compat) + sparse
-        sparse_indices, sparse_values = self._sparse_encode(text)
+        # Build vector: use named vectors only if collection supports sparse
+        has_sparse = await self._has_sparse_field(coll)
+        sparse_indices, sparse_values = self._sparse_encode(text) if has_sparse else ([], [])
         point_vectors: dict | list[float]
-        if sparse_indices:
+        if has_sparse and sparse_indices:
             point_vectors = {
                 "dense": vector,
                 "sparse": {"indices": sparse_indices, "values": sparse_values},
             }
         else:
-            # テキストが空/極短の場合は dense のみ (unnamed)
             point_vectors = vector
 
         upsert_payload = {
