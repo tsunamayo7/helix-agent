@@ -131,6 +131,8 @@ class RightsRegistry:
             raise ValueError(f"Invalid source '{source}'. Must be one of {VALID_SOURCES}")
         if not name:
             raise ValueError("name must not be empty")
+        if not license:
+            raise ValueError("license must not be empty")
 
         asset_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()

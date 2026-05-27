@@ -48,6 +48,31 @@ class HealthHandler(BaseHTTPRequestHandler):
         else:
             self._respond_json({"error": "not found"}, 404)
 
+    def do_POST(self):
+        if self.path == "/heartbeat":
+            self._handle_remote_heartbeat()
+        else:
+            self._respond_json({"error": "not found"}, 404)
+
+    def _handle_remote_heartbeat(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+            daemon = body.get("daemon", "")
+            if not daemon or not all(c.isalnum() or c == "_" for c in daemon):
+                self._respond_json({"error": "invalid daemon name"}, 400)
+                return
+            hb_dir = HELIX_DIR / "heartbeats"
+            hb_dir.mkdir(parents=True, exist_ok=True)
+            body.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+            body["remote"] = True
+            (hb_dir / f"{daemon}.json").write_text(
+                json.dumps(body, ensure_ascii=False), encoding="utf-8",
+            )
+            self._respond_json({"ok": True, "daemon": daemon})
+        except (json.JSONDecodeError, ValueError) as e:
+            self._respond_json({"error": str(e)}, 400)
+
     def _respond_json(self, data: dict, code: int = 200):
         body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
         self.send_response(code)

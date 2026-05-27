@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import math
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -23,6 +26,8 @@ class QdrantMemoryConfig:
     top_k: int = 5
     score_threshold: float = 0.3
     api_key: str = os.environ.get("QDRANT_API_KEY", "").strip()
+    sparse_ngram_range: tuple[int, int] = (2, 4)
+    sparse_vocab_size: int = 50_000
 
 
 class QdrantMemory:
@@ -40,6 +45,78 @@ class QdrantMemory:
         if not embeddings:
             raise RuntimeError("Embedding returned empty result")
         return embeddings[0]
+
+    # ── Sparse vector encoder (char N-gram + TF) ──
+
+    _PUNCT_RE = re.compile(r"[\s　​﻿]+")
+    _STRIP_RE = re.compile(r"[。、，．．！？!?,.\-;:\"'()（）「」『』【】\[\]{}<>…―─\n\r\t]+")
+
+    def _sparse_encode(self, text: str) -> tuple[list[int], list[float]]:
+        """文字 N-gram (2-4gram) ベースの sparse vector.
+
+        日本語は分かち書き不要 — 文字 N-gram が部分一致検索として機能する。
+        Returns (indices, values) where indices are hashed N-gram IDs and
+        values are TF (term frequency) weights with sub-linear scaling.
+        """
+        lo, hi = self.config.sparse_ngram_range
+        vocab = self.config.sparse_vocab_size
+
+        # 正規化: 小文字化 + 句読点/空白除去
+        t = self._STRIP_RE.sub("", self._PUNCT_RE.sub(" ", text.lower()))
+        tokens = t.split()  # whitespace split (英語語境界 + 日本語は1塊)
+
+        counts: dict[int, int] = {}
+        for token in tokens:
+            for n in range(lo, hi + 1):
+                for i in range(len(token) - n + 1):
+                    gram = token[i : i + n]
+                    h = int(hashlib.md5(gram.encode("utf-8")).hexdigest(), 16) % vocab
+                    counts[h] = counts.get(h, 0) + 1
+
+        if not counts:
+            return ([], [])
+
+        # Sub-linear TF: 1 + log(tf) to avoid domination by repeated terms
+        indices = sorted(counts.keys())
+        values = [1.0 + math.log(counts[idx]) if counts[idx] > 1 else 1.0 for idx in indices]
+        return (indices, values)
+
+    async def ensure_sparse_field(self, collection: str | None = None) -> bool:
+        """Qdrant コレクションに sparse vector field 'sparse' を追加 (冪等).
+
+        既に存在する場合はスキップ。PUT /collections/{name}/vectors で追加。
+        """
+        coll = collection or self.config.collection
+        # まずコレクション情報を取得して sparse field の有無を確認
+        try:
+            async with httpx.AsyncClient(timeout=10.0, headers=self._headers) as client:
+                r = await client.get(f"{self.config.qdrant_url}/collections/{coll}")
+                r.raise_for_status()
+                info = r.json()
+            vectors_config = info.get("result", {}).get("config", {}).get("params", {}).get("vectors", {})
+            # sparse vectors は別キー
+            sparse_config = info.get("result", {}).get("config", {}).get("params", {}).get("sparse_vectors", {})
+            if "sparse" in sparse_config:
+                return True  # 既に存在
+        except Exception:
+            return False
+
+        # sparse field を追加
+        try:
+            payload = {
+                "sparse_vectors": {
+                    "sparse": {}  # Qdrant は modifier 不要でデフォルト設定
+                }
+            }
+            await self._qdrant_post(
+                f"/collections/{coll}",
+                payload,
+                method="PUT",  # PATCH semantic — Qdrant は PUT で部分更新
+                timeout=15.0,
+            )
+            return True
+        except Exception:
+            return False
 
     async def _qdrant_post(self, path: str, payload: dict, timeout: float = 15.0, method: str = "POST") -> dict:
         url = f"{self.config.qdrant_url}{path}"
@@ -83,7 +160,7 @@ class QdrantMemory:
         qdrant_filter = {"must": must_filters}
 
         if hybrid:
-            result = await self._hybrid_query(vector, k, coll, qdrant_filter)
+            result = await self._hybrid_query(vector, k, coll, qdrant_filter, query_text=query)
         else:
             result = await self._dense_search(vector, k, coll, qdrant_filter)
 
@@ -115,12 +192,12 @@ class QdrantMemory:
         limit: int,
         collection: str,
         qdrant_filter: dict,
+        query_text: str = "",
     ) -> dict:
         """Hybrid search via Query API (POST /points/query).
 
-        Phase 1: dense-only prefetch + RRF fusion.
-        将来 sparse vector を追加する場合は prefetch リストに
-        {"query": sparse_vector, "using": "sparse", "limit": ...} を追加する。
+        Phase 2: dense + sparse prefetch → RRF fusion.
+        sparse vector は文字 N-gram ベースで生成。
         """
         prefetch = [
             {
@@ -129,9 +206,18 @@ class QdrantMemory:
                 "limit": limit * 3,
                 "filter": qdrant_filter,
             },
-            # Phase 2: sparse vector prefetch をここに追加
-            # {"query": {"indices": [...], "values": [...]}, "using": "sparse", "limit": limit * 3, "filter": qdrant_filter},
         ]
+
+        # Phase 2: sparse vector prefetch
+        if query_text:
+            indices, values = self._sparse_encode(query_text)
+            if indices:
+                prefetch.append({
+                    "query": {"indices": indices, "values": values},
+                    "using": "sparse",
+                    "limit": limit * 3,
+                    "filter": qdrant_filter,
+                })
 
         payload = {
             "prefetch": prefetch,
@@ -182,11 +268,23 @@ class QdrantMemory:
         if metadata:
             payload.update(metadata)
 
+        # Build vector dict: dense (unnamed for backward compat) + sparse
+        sparse_indices, sparse_values = self._sparse_encode(text)
+        point_vectors: dict | list[float]
+        if sparse_indices:
+            point_vectors = {
+                "dense": vector,
+                "sparse": {"indices": sparse_indices, "values": sparse_values},
+            }
+        else:
+            # テキストが空/極短の場合は dense のみ (unnamed)
+            point_vectors = vector
+
         upsert_payload = {
             "points": [
                 {
                     "id": point_id,
-                    "vector": vector,
+                    "vector": point_vectors,
                     "payload": payload,
                 }
             ]
@@ -202,11 +300,11 @@ class QdrantMemory:
             self._append_canonical_log(point_id, coll, text, payload, status="stored")
             return point_id
         except Exception:
-            self._spool_to_jsonl(text, payload, coll, vector)
+            self._spool_to_jsonl(text, payload, coll, vector, point_id=point_id)
             self._append_canonical_log(point_id, coll, text, payload, status="spooled")
             return f"spool:{point_id}"
 
-    def _spool_to_jsonl(self, text: str, payload: dict, collection: str, vector: list[float]) -> None:
+    def _spool_to_jsonl(self, text: str, payload: dict, collection: str, vector: list[float], point_id: str = "") -> None:
         """Qdrant 接続失敗時にローカル JSONL に蓄積 (後で replay)."""
         import json as _json
         from pathlib import Path as _Path

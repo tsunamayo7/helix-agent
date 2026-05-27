@@ -2,11 +2,75 @@
 
 from __future__ import annotations
 
+import json as _json
+import logging
+
 from fastmcp import Context, FastMCP
+from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.tools.tool import ToolResult
+from mcp.types import TextContent
 
 from src.agent import AgentConfig, HelixAgent
 from src.agent_loader import AgentLoader
+from src.mcp_security import check_tool_permission
 from src.token_saver import RetryGuard, TokenSaver
+
+_security_log = logging.getLogger("helix.security")
+
+
+# ---------------------------------------------------------------------------
+# Security Middleware — deny-by-default policy enforcement
+# ---------------------------------------------------------------------------
+
+
+class SecurityMiddleware(Middleware):
+    """FastMCP middleware that enforces mcp_security policy on every tool call.
+
+    Policy behaviour:
+      - LOW:     pass through silently.
+      - MEDIUM:  pass through; audit log written by check_tool_permission().
+      - HIGH:    return a warning ToolResult instead of executing the tool.
+                 (MCP servers cannot ask the client for confirmation, so we
+                  surface a structured warning that the orchestrator can act on.)
+      - UNKNOWN: same as HIGH (deny-by-default).
+    """
+
+    async def on_call_tool(self, context, *, call_next):  # noqa: ANN001
+        """Intercept tools/call and apply security policy."""
+        message = context.message
+        tool_name: str = message.name
+        params: dict = message.arguments or {}
+
+        allowed, reason = check_tool_permission(tool_name, params)
+
+        if allowed:
+            # LOW or MEDIUM — proceed normally
+            if reason:
+                _security_log.info("security audit: %s — %s", tool_name, reason)
+            return await call_next(context)
+
+        # HIGH or UNKNOWN — return a warning instead of blocking
+        _security_log.warning(
+            "security policy denied tool=%s reason=%s params=%s",
+            tool_name, reason, _json.dumps(params, ensure_ascii=False, default=str)[:200],
+        )
+        warning_payload = _json.dumps(
+            {
+                "warning": "security_blocked",
+                "tool": tool_name,
+                "reason": reason,
+                "action_required": (
+                    "This tool was denied by the helix-agent security policy. "
+                    "If this action is intentional, add the tool to the "
+                    "security registry in src/mcp_security.py."
+                ),
+            },
+            ensure_ascii=False,
+        )
+        return ToolResult(
+            content=[TextContent(type="text", text=warning_payload)],
+        )
+
 
 mcp = FastMCP(
     "helix-agent",
@@ -40,6 +104,8 @@ mcp = FastMCP(
         "   - GPU auto-detected at startup — optimal model selected for 8GB to 96GB+ VRAM."
     ),
 )
+
+mcp.add_middleware(SecurityMiddleware())
 
 runtime = HelixAgent(AgentConfig())
 agent_loader = AgentLoader()

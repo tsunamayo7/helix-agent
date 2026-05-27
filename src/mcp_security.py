@@ -8,7 +8,7 @@ This module provides:
   2. Permission checking with parameter-aware rules
   3. JSONL audit logging for MEDIUM and HIGH risk operations
 
-Usage (future integration with server.py):
+Usage (integrated via SecurityMiddleware in server.py):
     from src.mcp_security import check_tool_permission
 
     allowed, reason = check_tool_permission("computer_use", {"action": "click"})
@@ -16,9 +16,10 @@ Usage (future integration with server.py):
         return {"error": reason}
 
 Architecture note:
-    This module is designed as a standalone policy engine that does NOT import
-    from server.py or modify existing tool registrations. Integration will be
-    done by wrapping tool handlers in server.py at a later stage.
+    This module is a standalone policy engine that does NOT import from
+    server.py. Integration is done via FastMCP Middleware in server.py
+    (SecurityMiddleware.on_call_tool) which calls check_tool_permission()
+    on every tools/call request.
 """
 
 from __future__ import annotations
@@ -422,7 +423,7 @@ def list_tool_classifications() -> dict[str, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Convenience: summary for server.py integration (future)
+# Convenience: summary for server.py integration
 # ---------------------------------------------------------------------------
 
 def security_summary() -> str:

@@ -5,10 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 
 # Default allowed directories
-DEFAULT_ALLOWED_ROOTS = [
-    Path("C:/Development"),
-    Path("C:/Users/tomot/Documents"),
-]
+import os as _os
+
+if _os.name == "nt":
+    DEFAULT_ALLOWED_ROOTS = [
+        Path("C:/Development"),
+        Path.home() / "Documents",
+    ]
+else:
+    DEFAULT_ALLOWED_ROOTS = [
+        Path.home() / "Development",
+        Path.home() / "Documents",
+    ]
 
 # Blocked file patterns (case-insensitive)
 BLOCKED_PATTERNS = [
@@ -39,10 +47,11 @@ class PathGuard:
                 f"({', '.join(str(r) for r in self.allowed_roots)})"
             )
 
-        # Check blocked patterns
+        # Check blocked patterns against all path components
+        parts_lower = [p.lower() for p in resolved.parts]
         name_lower = resolved.name.lower()
         for pattern in BLOCKED_PATTERNS:
-            if pattern in name_lower:
+            if pattern in name_lower or pattern in parts_lower:
                 raise PermissionError(f"Sensitive file blocked: {resolved.name}")
 
         # Check blocked extensions
