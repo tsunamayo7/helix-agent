@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json as _json
 import logging
+import time as _time
 
 from fastmcp import Context, FastMCP
 from fastmcp.server.middleware import Middleware, MiddlewareContext
@@ -12,6 +13,7 @@ from mcp.types import TextContent
 
 from src.agent import AgentConfig, HelixAgent
 from src.agent_loader import AgentLoader
+from src.langfuse_tracing import init_tracing, trace_tool_call
 from src.mcp_security import check_tool_permission
 from src.token_saver import RetryGuard, TokenSaver
 
@@ -47,13 +49,18 @@ class SecurityMiddleware(Middleware):
             # LOW or MEDIUM — proceed normally
             if reason:
                 _security_log.info("security audit: %s — %s", tool_name, reason)
-            return await call_next(context)
+            start = _time.monotonic()
+            result = await call_next(context)
+            duration = (_time.monotonic() - start) * 1000
+            trace_tool_call(tool_name, params, {"status": "ok"}, duration)
+            return result
 
         # HIGH or UNKNOWN — return a warning instead of blocking
         _security_log.warning(
             "security policy denied tool=%s reason=%s params=%s",
             tool_name, reason, _json.dumps(params, ensure_ascii=False, default=str)[:200],
         )
+        trace_tool_call(tool_name, params, {"blocked": reason}, 0)
         warning_payload = _json.dumps(
             {
                 "warning": "security_blocked",
@@ -106,6 +113,7 @@ mcp = FastMCP(
 )
 
 mcp.add_middleware(SecurityMiddleware())
+init_tracing()
 
 runtime = HelixAgent(AgentConfig())
 agent_loader = AgentLoader()
