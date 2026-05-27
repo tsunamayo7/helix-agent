@@ -24,6 +24,7 @@ Architecture note:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -339,6 +340,38 @@ def check_tool_permission(
 # Audit logging
 # ---------------------------------------------------------------------------
 
+def _get_last_line_hash(path: Path) -> str:
+    """Return SHA-256 hex digest of the last line in *path*.
+
+    If the file does not exist or is empty, return a zero hash.
+    """
+    zero = "0" * 64
+    if not path.exists():
+        return zero
+    try:
+        last = ""
+        with open(path, "rb") as f:
+            # Read last non-empty line efficiently
+            f.seek(0, 2)
+            size = f.tell()
+            if size == 0:
+                return zero
+            # Read up to last 8 KB to find the final line
+            read_size = min(size, 8192)
+            f.seek(-read_size, 2)
+            lines = f.read().split(b"\n")
+            # Filter empty trailing lines
+            for candidate in reversed(lines):
+                if candidate.strip():
+                    last = candidate.decode("utf-8", errors="replace")
+                    break
+        if not last:
+            return zero
+        return hashlib.sha256(last.encode("utf-8")).hexdigest()
+    except Exception:
+        return zero
+
+
 def _write_audit_log(
     tool_name: str,
     risk: str,
@@ -348,14 +381,24 @@ def _write_audit_log(
 ) -> None:
     """Append audit entry to the JSONL log file.
 
+    Tamper-resistance measures:
+      - Each entry includes ``prev_hash`` (SHA-256 of the previous line).
+      - File permissions are set to 0o600 (owner read/write only).
+      - For HIGH/UNKNOWN denied operations, write failure raises RuntimeError
+        (fail-closed) so the tool invocation is also blocked.
+
     Sensitive parameter values (passwords, tokens, keys) are redacted.
     """
+    # Determine if this is a fail-closed entry
+    fail_closed = not allowed and risk in ("high", "unknown")
+
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "tool": tool_name,
         "risk": risk,
         "allowed": allowed,
         "reason": reason,
+        "prev_hash": _get_last_line_hash(AUDIT_LOG_PATH),
     }
 
     # Include sanitized params for forensics (redact sensitive values)
@@ -368,9 +411,14 @@ def _write_audit_log(
         AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except OSError:
-        # Audit logging must not break tool execution
-        pass
+        # Ensure owner-only access (0o600)
+        os.chmod(AUDIT_LOG_PATH, 0o600)
+    except OSError as exc:
+        if fail_closed:
+            raise RuntimeError(
+                f"Audit log write failed for denied {risk}-risk tool '{tool_name}': {exc}"
+            ) from exc
+        # Non-critical entries: audit logging must not break tool execution
 
 
 def _redact_sensitive(params: dict[str, Any]) -> dict[str, Any]:

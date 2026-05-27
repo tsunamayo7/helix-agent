@@ -27,7 +27,7 @@ class QdrantMemoryConfig:
     score_threshold: float = 0.3
     api_key: str = os.environ.get("QDRANT_API_KEY", "").strip()
     sparse_ngram_range: tuple[int, int] = (2, 4)
-    sparse_vocab_size: int = 50_000
+    sparse_vocab_size: int = 500_000
 
 
 class QdrantMemory:
@@ -89,6 +89,13 @@ class QdrantMemory:
         indices = sorted(counts.keys())
         values = [1.0 + math.log(counts[idx]) if counts[idx] > 1 else 1.0 for idx in indices]
         return (indices, values)
+
+    def sparse_encode(self, text: str) -> tuple[list[int], list[float]]:
+        """Public API for sparse vector generation.
+
+        Returns (indices, values) tuple for Qdrant sparse vector upsert.
+        """
+        return self._sparse_encode(text)
 
     async def ensure_sparse_field(self, collection: str | None = None) -> bool:
         """Check whether the collection has a sparse vector field 'sparse'.

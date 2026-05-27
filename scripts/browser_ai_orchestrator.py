@@ -188,6 +188,10 @@ class BrowserAIOrchestrator:
     def cancel(self, task_id: str) -> bool:
         """タスクをキャンセル.
 
+        pending および running 状態のタスクをキャンセルできる。
+        外部ワーカーへの通知は行わない — ワーカーは dequeue 時に
+        status を確認し、cancelled であれば処理をスキップすること。
+
         Returns:
             キャンセルできたらTrue
         """
@@ -196,7 +200,9 @@ class BrowserAIOrchestrator:
             for e in entries:
                 if e["id"] == task_id and e["status"] in ("pending", "running"):
                     e["status"] = "cancelled"
-                    e["completed_at"] = _now_iso()
+                    now = _now_iso()
+                    e["completed_at"] = now
+                    e["cancelled_at"] = now
                     _write_jsonl(self.queue_path, entries)
                     return True
         return False

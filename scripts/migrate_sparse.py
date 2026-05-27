@@ -161,9 +161,6 @@ def convert_vector(point: dict, sparse_encoder: QdrantMemory) -> dict:
 
     元のコレクションは unnamed vector (直接 vector: [...]) なので、
     named vectors 形式 {"dense": [...], "sparse": {...}} に変換する。
-
-    NOTE: _sparse_encode は QdrantMemory の内部API。
-    パブリックメソッド化は本スクリプトのスコープ外。
     """
     # 元の vector を取得 (unnamed = list[float], named = dict)
     raw_vector = point.get("vector", [])
@@ -177,9 +174,9 @@ def convert_vector(point: dict, sparse_encoder: QdrantMemory) -> dict:
     else:
         dense = []
 
-    # sparse vector 生成 (内部API: QdrantMemory._sparse_encode)
+    # sparse vector 生成 (パブリック API)
     text = extract_text(point.get("payload", {}))
-    indices, values = sparse_encoder._sparse_encode(text)
+    indices, values = sparse_encoder.sparse_encode(text)
 
     result: dict = {"dense": dense}
     if indices:
@@ -487,8 +484,13 @@ async def migrate_collection(
                         print(f"  ロールバック: 中途半端な {name} を削除")
 
                     # 元の形式でコレクションを再作成
+                    # unnamed vector の場合、Qdrant PUT API は named 形式を要求する
+                    if isinstance(vectors_config, dict) and "size" in vectors_config:
+                        restore_vectors = {"dense": vectors_config}
+                    else:
+                        restore_vectors = vectors_config
                     restore_config: dict = {
-                        "vectors": vectors_config,
+                        "vectors": restore_vectors,
                     }
                     if sparse_config:
                         restore_config["sparse_vectors"] = sparse_config
