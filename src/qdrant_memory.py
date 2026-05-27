@@ -185,8 +185,10 @@ class QdrantMemory:
         qdrant_filter: dict,
     ) -> dict:
         """既存の dense vector 検索 (POST /points/search)."""
+        has_sparse = await self._has_sparse_field(collection)
+        vec_value: dict | list[float] = {"name": "dense", "vector": vector} if has_sparse else vector
         payload = {
-            "vector": vector,
+            "vector": vec_value,
             "limit": limit,
             "score_threshold": self.config.score_threshold,
             "filter": qdrant_filter,
