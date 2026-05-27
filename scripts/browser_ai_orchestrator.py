@@ -34,9 +34,12 @@ GPT/Grok/Gemini/Ollama へのタスクをJSONLベースのキューで管理す�
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
+import os
 import sys
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -58,6 +61,7 @@ class BrowserAIOrchestrator:
         self.queue_path = queue_path or QUEUE_PATH
         self.results_path = results_path or RESULTS_PATH
         self.queue_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock_path = self.queue_path.with_suffix(".lock")
 
     # ------------------------------------------------------------------
     # Core operations
@@ -96,7 +100,8 @@ class BrowserAIOrchestrator:
             "context": context,
             "created_at": _now_iso(),
         }
-        _append_jsonl(self.queue_path, entry)
+        with _file_lock(self._lock_path):
+            _append_jsonl(self.queue_path, entry)
         return task_id
 
     def dequeue(self, target: str | None = None) -> dict | None:
@@ -110,27 +115,28 @@ class BrowserAIOrchestrator:
         Returns:
             タスクdict、なければNone
         """
-        entries = _read_jsonl(self.queue_path)
-        pending = [
-            e for e in entries
-            if e.get("status") == "pending"
-            and (target is None or e.get("target") == target)
-        ]
-        if not pending:
-            return None
+        with _file_lock(self._lock_path):
+            entries = _read_jsonl(self.queue_path)
+            pending = [
+                e for e in entries
+                if e.get("status") == "pending"
+                and (target is None or e.get("target") == target)
+            ]
+            if not pending:
+                return None
 
-        # priority昇順 → created_at昇順
-        pending.sort(key=lambda e: (e.get("priority", DEFAULT_PRIORITY), e.get("created_at", "")))
-        chosen = pending[0]
+            # priority昇順 → created_at昇順
+            pending.sort(key=lambda e: (e.get("priority", DEFAULT_PRIORITY), e.get("created_at", "")))
+            chosen = pending[0]
 
-        # statusをrunningに更新
-        for e in entries:
-            if e["id"] == chosen["id"]:
-                e["status"] = "running"
-                e["started_at"] = _now_iso()
-                break
+            # statusをrunningに更新
+            for e in entries:
+                if e["id"] == chosen["id"]:
+                    e["status"] = "running"
+                    e["started_at"] = _now_iso()
+                    break
 
-        _write_jsonl(self.queue_path, entries)
+            _write_jsonl(self.queue_path, entries)
         return chosen
 
     def complete(
@@ -140,6 +146,9 @@ class BrowserAIOrchestrator:
         status: str = "completed",
     ) -> bool:
         """タスクを完了マークし、結果をresultsファイルに保存.
+
+        キュー更新とresults書き込みを同一ロック内で実行し、
+        片方だけ成功する中間状態を防止する (P2修正)。
 
         Args:
             task_id: タスクのUUID
@@ -152,28 +161,28 @@ class BrowserAIOrchestrator:
         if status not in ("completed", "failed"):
             raise ValueError(f"無効なstatus: {status} (有効: completed, failed)")
 
-        entries = _read_jsonl(self.queue_path)
-        found = False
-        for e in entries:
-            if e["id"] == task_id:
-                e["status"] = status
-                e["completed_at"] = _now_iso()
-                found = True
-                break
+        with _file_lock(self._lock_path):
+            entries = _read_jsonl(self.queue_path)
+            found = False
+            for e in entries:
+                if e["id"] == task_id:
+                    e["status"] = status
+                    e["completed_at"] = _now_iso()
+                    found = True
+                    break
 
-        if not found:
-            return False
+            if not found:
+                return False
 
-        _write_jsonl(self.queue_path, entries)
-
-        # 結果を別ファイルに保存
-        result_entry = {
-            "id": task_id,
-            "status": status,
-            "result": result,
-            "completed_at": _now_iso(),
-        }
-        _append_jsonl(self.results_path, result_entry)
+            # 結果を別ファイルに保存 (キュー更新と同一ロック内)
+            result_entry = {
+                "id": task_id,
+                "status": status,
+                "result": result,
+                "completed_at": _now_iso(),
+            }
+            _append_jsonl(self.results_path, result_entry)
+            _write_jsonl(self.queue_path, entries)
         return True
 
     def cancel(self, task_id: str) -> bool:
@@ -182,13 +191,14 @@ class BrowserAIOrchestrator:
         Returns:
             キャンセルできたらTrue
         """
-        entries = _read_jsonl(self.queue_path)
-        for e in entries:
-            if e["id"] == task_id and e["status"] in ("pending", "running"):
-                e["status"] = "cancelled"
-                e["completed_at"] = _now_iso()
-                _write_jsonl(self.queue_path, entries)
-                return True
+        with _file_lock(self._lock_path):
+            entries = _read_jsonl(self.queue_path)
+            for e in entries:
+                if e["id"] == task_id and e["status"] in ("pending", "running"):
+                    e["status"] = "cancelled"
+                    e["completed_at"] = _now_iso()
+                    _write_jsonl(self.queue_path, entries)
+                    return True
         return False
 
     def list_pending(self, target: str | None = None) -> list[dict]:
@@ -239,19 +249,20 @@ class BrowserAIOrchestrator:
         Returns:
             削除した件数
         """
-        entries = _read_jsonl(self.queue_path)
-        active = [e for e in entries if e.get("status") in ("pending", "running")]
-        done = [e for e in entries if e.get("status") not in ("pending", "running")]
+        with _file_lock(self._lock_path):
+            entries = _read_jsonl(self.queue_path)
+            active = [e for e in entries if e.get("status") in ("pending", "running")]
+            done = [e for e in entries if e.get("status") not in ("pending", "running")]
 
-        if len(done) <= keep_last:
-            return 0
+            if len(done) <= keep_last:
+                return 0
 
-        # 古い順にソートして末尾keep_last件を残す
-        done.sort(key=lambda e: e.get("completed_at", e.get("created_at", "")))
-        removed = len(done) - keep_last
-        kept_done = done[removed:]
+            # 古い順にソートして末尾keep_last件を残す
+            done.sort(key=lambda e: e.get("completed_at", e.get("created_at", "")))
+            removed = len(done) - keep_last
+            kept_done = done[removed:]
 
-        _write_jsonl(self.queue_path, active + kept_done)
+            _write_jsonl(self.queue_path, active + kept_done)
         return removed
 
 
@@ -261,6 +272,23 @@ class BrowserAIOrchestrator:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+@contextmanager
+def _file_lock(lock_path: Path):
+    """fcntl.flock ベースの排他ロック (macOS).
+
+    同一ファイルシステム上の複数プロセスが同じ lock_path を
+    指定することで、read-modify-write の競合を防止する。
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -285,10 +313,19 @@ def _append_jsonl(path: Path, entry: dict) -> None:
 
 
 def _write_jsonl(path: Path, entries: list[dict]) -> None:
+    """全件上書き (アトミック: tmp書き込み → rename).
+
+    同一ファイルシステム上の rename は POSIX でアトミック。
+    書き込み中にクラッシュしても元ファイルは無傷。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
+    tmp = path.with_suffix(".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
         for entry in entries:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.rename(path)
 
 
 # ------------------------------------------------------------------

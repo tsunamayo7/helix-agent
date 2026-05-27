@@ -17,6 +17,7 @@ import asyncio
 import os
 import sys
 import time
+from collections.abc import Awaitable, Callable
 
 # src パッケージを import 可能にする
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -37,6 +38,9 @@ DEPT_COLLECTIONS = [
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "").strip()
+
+# batch-size 上限 (Qdrant REST API の安全範囲)
+MAX_BATCH_SIZE = 500
 
 
 def _headers() -> dict[str, str]:
@@ -93,18 +97,24 @@ async def get_points_count(client: httpx.AsyncClient, name: str) -> int:
     return info.get("points_count", 0)
 
 
-# ── スクロール (全ポイント取得) ──
+# ── ストリーミングスクロール ──
 
 
-async def scroll_all_points(
+async def scroll_and_process(
     client: httpx.AsyncClient,
     collection: str,
     batch_size: int,
-    total: int,
-) -> list[dict]:
-    """コレクションから全ポイントをスクロールで取得."""
-    all_points: list[dict] = []
+    callback: Callable[[list[dict]], Awaitable[None]],
+    total_hint: int = 0,
+    label: str = "scroll",
+) -> int:
+    """コレクションをスクロールしながらバッチ単位で callback を呼ぶ。
+
+    全件をメモリに保持しない。callback にはバッチ (list[dict]) が渡される。
+    戻り値は処理した総ポイント数。
+    """
     offset: str | int | None = None
+    processed = 0
     batch_num = 0
 
     while True:
@@ -121,15 +131,18 @@ async def scroll_all_points(
         points = result.get("points", [])
         next_offset = result.get("next_page_offset")
 
-        all_points.extend(points)
-        batch_num += 1
-        print(f"  scroll: {len(all_points)}/{total} ポイント取得済み (batch {batch_num})")
+        if points:
+            await callback(points)
+            processed += len(points)
+            batch_num += 1
+            hint_str = f"/{total_hint}" if total_hint else ""
+            print(f"  {label}: {processed}{hint_str} ポイント処理済み (batch {batch_num})")
 
         if not points or next_offset is None:
             break
         offset = next_offset
 
-    return all_points
+    return processed
 
 
 # ── テキスト抽出 ──
@@ -148,6 +161,9 @@ def convert_vector(point: dict, sparse_encoder: QdrantMemory) -> dict:
 
     元のコレクションは unnamed vector (直接 vector: [...]) なので、
     named vectors 形式 {"dense": [...], "sparse": {...}} に変換する。
+
+    NOTE: _sparse_encode は QdrantMemory の内部API。
+    パブリックメソッド化は本スクリプトのスコープ外。
     """
     # 元の vector を取得 (unnamed = list[float], named = dict)
     raw_vector = point.get("vector", [])
@@ -161,7 +177,7 @@ def convert_vector(point: dict, sparse_encoder: QdrantMemory) -> dict:
     else:
         dense = []
 
-    # sparse vector 生成
+    # sparse vector 生成 (内部API: QdrantMemory._sparse_encode)
     text = extract_text(point.get("payload", {}))
     indices, values = sparse_encoder._sparse_encode(text)
 
@@ -172,6 +188,35 @@ def convert_vector(point: dict, sparse_encoder: QdrantMemory) -> dict:
     return result
 
 
+# ── indexing 待ち ──
+
+
+async def wait_for_indexing(
+    client: httpx.AsyncClient,
+    collection: str,
+    expected: int,
+    wait_timeout: int,
+    label: str = "",
+) -> int:
+    """indexing が完了するまで待機。expected 以上になったポイント数を返す。"""
+    deadline = time.monotonic() + wait_timeout
+    interval = 2  # 初回 2秒
+    max_interval = 30
+
+    while time.monotonic() < deadline:
+        count = await get_points_count(client, collection)
+        if count >= expected:
+            return count
+        remaining = int(deadline - time.monotonic())
+        tag = f" ({label})" if label else ""
+        print(f"  indexing 待ち{tag}... ({count}/{expected}, 残り{remaining}秒)")
+        await asyncio.sleep(min(interval, max(1, remaining)))
+        interval = min(interval * 1.5, max_interval)
+
+    # タイムアウト — 最終値を返す
+    return await get_points_count(client, collection)
+
+
 # ── マイグレーション本体 ──
 
 
@@ -179,6 +224,7 @@ async def migrate_collection(
     name: str,
     batch_size: int,
     dry_run: bool,
+    wait_timeout: int = 300,
 ) -> bool:
     """単一コレクションのマイグレーションを実行."""
     v2_name = f"{name}_v2"
@@ -270,33 +316,22 @@ async def migrate_collection(
             await qdrant_put(client, f"/collections/{v2_name}", v2_config)
             print(f"  作成完了")
 
-        # ── Step 3: 全ポイントをスクロール ──
-        print(f"\n[3/9] ポイントスクロール: {name}")
-        all_points = await scroll_all_points(client, name, batch_size, original_count)
-        print(f"  取得完了: {len(all_points)} ポイント")
+        # ── Step 3-5: ストリーミングで sparse vector 生成 + v2 に upsert ──
+        # 旧: Step 3 で全件メモリ保持 → Step 4-5 で変換+upsert
+        # 新: scroll_and_process で 1 バッチずつ変換+upsert (メモリ = batch_size 分のみ)
+        print(f"\n[3-5/9] ストリーミング sparse vector 生成 + upsert")
 
-        if len(all_points) != original_count:
-            print(f"  警告: 取得数 ({len(all_points)}) != 元のポイント数 ({original_count})")
-            print(f"  (indexed vs total の差異、または進行中の書き込みの可能性)")
+        upsert_stats = {"upserted": 0, "sparse_generated": 0, "sparse_empty": 0}
 
-        # ── Step 4-5: sparse vector 生成 + v2 に upsert ──
-        print(f"\n[4-5/9] sparse vector 生成 + upsert")
-
-        total = len(all_points)
-        upserted = 0
-        sparse_generated = 0
-        sparse_empty = 0
-
-        for batch_start in range(0, total, batch_size):
-            batch = all_points[batch_start : batch_start + batch_size]
+        async def upsert_batch(batch: list[dict]) -> None:
+            """1バッチ分を変換して v2 に upsert."""
             converted_points = []
-
             for point in batch:
                 new_vectors = convert_vector(point, sparse_encoder)
                 if "sparse" in new_vectors:
-                    sparse_generated += 1
+                    upsert_stats["sparse_generated"] += 1
                 else:
-                    sparse_empty += 1
+                    upsert_stats["sparse_empty"] += 1
 
                 converted_points.append({
                     "id": point["id"],
@@ -304,41 +339,48 @@ async def migrate_collection(
                     "payload": point.get("payload", {}),
                 })
 
-            if dry_run:
-                upserted += len(converted_points)
-                print(f"  [DRY-RUN] upsert: {upserted}/{total} ポイント (sparse生成: {sparse_generated}, 空: {sparse_empty})")
-            else:
-                upsert_payload = {"points": converted_points}
-                await qdrant_put(client, f"/collections/{v2_name}/points", upsert_payload)
-                upserted += len(converted_points)
-                print(f"  upsert: {upserted}/{total} ポイント (sparse生成: {sparse_generated}, 空: {sparse_empty})")
+            if not dry_run:
+                await qdrant_put(
+                    client,
+                    f"/collections/{v2_name}/points",
+                    {"points": converted_points},
+                )
+            upsert_stats["upserted"] += len(converted_points)
+
+        total_processed = await scroll_and_process(
+            client, name, batch_size, upsert_batch,
+            total_hint=original_count,
+            label="upsert",
+        )
+
+        print(f"  処理完了: {total_processed} ポイント "
+              f"(sparse生成: {upsert_stats['sparse_generated']}, "
+              f"空: {upsert_stats['sparse_empty']})")
+
+        if total_processed != original_count:
+            print(f"  警告: 処理数 ({total_processed}) != 元のポイント数 ({original_count})")
+            print(f"  (indexed vs total の差異、または進行中の書き込みの可能性)")
 
         # ── Step 6: ポイント数検証 ──
         print(f"\n[6/9] ポイント数検証")
 
         if dry_run:
-            print(f"  [DRY-RUN] 検証スキップ (元: {original_count}, 処理: {upserted})")
+            print(f"  [DRY-RUN] 検証スキップ (元: {original_count}, 処理: {upsert_stats['upserted']})")
         else:
-            # upsert 後の indexing 待ち
-            for attempt in range(10):
-                v2_count = await get_points_count(client, v2_name)
-                if v2_count >= len(all_points):
-                    break
-                print(f"  indexing 待ち... ({v2_count}/{len(all_points)})")
-                await asyncio.sleep(1)
-
-            v2_count = await get_points_count(client, v2_name)
-            if v2_count != len(all_points):
-                print(f"  エラー: ポイント数不一致 (v2: {v2_count}, 元: {len(all_points)})")
+            v2_count = await wait_for_indexing(
+                client, v2_name, total_processed, wait_timeout, label="v2 indexing"
+            )
+            if v2_count != total_processed:
+                print(f"  エラー: ポイント数不一致 (v2: {v2_count}, 元: {total_processed})")
                 print(f"  中断: {v2_name} を手動で確認してください")
                 return False
-            print(f"  一致: {v2_count} == {len(all_points)}")
+            print(f"  一致: {v2_count} == {total_processed}")
 
         # ── Step 7: 元コレクションを old にバックアップ ──
         print(f"\n[7/9] 元コレクションを {old_name} にバックアップ")
 
         if dry_run:
-            print(f"  [DRY-RUN] {name} -> {old_name} (削除+再作成+データコピー)")
+            print(f"  [DRY-RUN] {name} -> {old_name} (削除+再作成+ストリーミングコピー)")
         else:
             # old が既に存在する場合は削除
             old_info = await get_collection_info(client, old_name)
@@ -354,10 +396,10 @@ async def migrate_collection(
                 old_config["sparse_vectors"] = sparse_config
             await qdrant_put(client, f"/collections/{old_name}", old_config)
 
-            # 元データを old にコピー
-            print(f"  {name} -> {old_name} にデータコピー中...")
-            for batch_start in range(0, len(all_points), batch_size):
-                batch = all_points[batch_start : batch_start + batch_size]
+            # ストリーミングで元データを old にコピー
+            print(f"  {name} -> {old_name} にストリーミングコピー中...")
+
+            async def backup_batch(batch: list[dict]) -> None:
                 backup_points = []
                 for point in batch:
                     backup_points.append({
@@ -365,20 +407,24 @@ async def migrate_collection(
                         "vector": point.get("vector", []),
                         "payload": point.get("payload", {}),
                     })
-                await qdrant_put(client, f"/collections/{old_name}/points", {"points": backup_points})
-                done = min(batch_start + batch_size, len(all_points))
-                print(f"  backup: {done}/{len(all_points)} ポイント")
+                await qdrant_put(
+                    client,
+                    f"/collections/{old_name}/points",
+                    {"points": backup_points},
+                )
+
+            backup_count = await scroll_and_process(
+                client, name, batch_size, backup_batch,
+                total_hint=original_count,
+                label="backup",
+            )
 
             # old のポイント数検証
-            for attempt in range(10):
-                old_count = await get_points_count(client, old_name)
-                if old_count >= len(all_points):
-                    break
-                await asyncio.sleep(1)
-
-            old_count = await get_points_count(client, old_name)
-            if old_count != len(all_points):
-                print(f"  エラー: backup ポイント数不一致 (old: {old_count}, 元: {len(all_points)})")
+            old_count = await wait_for_indexing(
+                client, old_name, backup_count, wait_timeout, label="backup indexing"
+            )
+            if old_count != backup_count:
+                print(f"  エラー: backup ポイント数不一致 (old: {old_count}, 元: {backup_count})")
                 print(f"  中断: 元コレクション {name} は変更されていません")
                 return False
             print(f"  backup 検証 OK: {old_count} ポイント")
@@ -401,12 +447,10 @@ async def migrate_collection(
                 await qdrant_put(client, f"/collections/{name}", v2_config)
                 print(f"  {name} (named vectors + sparse) 作成完了")
 
-                # v2 から新しい name にデータコピー
-                print(f"  {v2_name} -> {name} にデータコピー中...")
-                v2_points = await scroll_all_points(client, v2_name, batch_size, upserted)
+                # v2 -> name にストリーミングコピー
+                print(f"  {v2_name} -> {name} にストリーミングコピー中...")
 
-                for batch_start in range(0, len(v2_points), batch_size):
-                    batch = v2_points[batch_start : batch_start + batch_size]
+                async def rename_copy_batch(batch: list[dict]) -> None:
                     copy_points = []
                     for point in batch:
                         copy_points.append({
@@ -414,9 +458,17 @@ async def migrate_collection(
                             "vector": point.get("vector", {}),
                             "payload": point.get("payload", {}),
                         })
-                    await qdrant_put(client, f"/collections/{name}/points", {"points": copy_points})
-                    done = min(batch_start + batch_size, len(v2_points))
-                    print(f"  copy: {done}/{len(v2_points)} ポイント")
+                    await qdrant_put(
+                        client,
+                        f"/collections/{name}/points",
+                        {"points": copy_points},
+                    )
+
+                rename_count = await scroll_and_process(
+                    client, v2_name, batch_size, rename_copy_batch,
+                    total_hint=upsert_stats["upserted"],
+                    label="copy",
+                )
 
                 # v2 コレクションを削除
                 await qdrant_delete(client, f"/collections/{v2_name}")
@@ -443,13 +495,8 @@ async def migrate_collection(
                     await qdrant_put(client, f"/collections/{name}", restore_config)
                     print(f"  ロールバック: {name} を再作成")
 
-                    # {name}_old から全ポイントを読み取り
-                    old_points = await scroll_all_points(client, old_name, batch_size, len(all_points))
-                    print(f"  ロールバック: {old_name} から {len(old_points)} ポイント読み取り")
-
-                    # {name} にデータを復元
-                    for batch_start in range(0, len(old_points), batch_size):
-                        batch = old_points[batch_start : batch_start + batch_size]
+                    # {name}_old からストリーミングでデータ復元
+                    async def restore_batch(batch: list[dict]) -> None:
                         restore_points = []
                         for point in batch:
                             restore_points.append({
@@ -457,24 +504,35 @@ async def migrate_collection(
                                 "vector": point.get("vector", []),
                                 "payload": point.get("payload", {}),
                             })
-                        await qdrant_put(client, f"/collections/{name}/points", {"points": restore_points})
-                        done = min(batch_start + batch_size, len(old_points))
-                        print(f"  restore: {done}/{len(old_points)} ポイント")
+                        await qdrant_put(
+                            client,
+                            f"/collections/{name}/points",
+                            {"points": restore_points},
+                        )
+
+                    restore_total = await scroll_and_process(
+                        client, old_name, batch_size, restore_batch,
+                        total_hint=original_count,
+                        label="restore",
+                    )
+                    print(f"  ロールバック: {old_name} から {restore_total} ポイント復元")
 
                     # 復元後のポイント数検証
-                    for attempt in range(10):
-                        restored_count = await get_points_count(client, name)
-                        if restored_count >= len(all_points):
-                            break
-                        await asyncio.sleep(1)
+                    restored_count = await wait_for_indexing(
+                        client, name, restore_total, wait_timeout, label="restore indexing"
+                    )
 
-                    restored_count = await get_points_count(client, name)
-                    if restored_count == len(all_points):
+                    if restored_count == restore_total:
                         print(f"  *** ロールバック成功: {name} を {restored_count} ポイントで復元")
-                        print(f"  *** {v2_name} は手動確認用に残しています")
                     else:
-                        print(f"  *** ロールバック警告: ポイント数不一致 (復元: {restored_count}, 元: {len(all_points)})")
+                        print(f"  *** ロールバック警告: ポイント数不一致 (復元: {restored_count}, 元: {restore_total})")
                         print(f"  *** {old_name} のデータは保持されています。手動リストアしてください")
+
+                    # ロールバック成功後、v2_name が残っていれば削除
+                    v2_leftover = await get_collection_info(client, v2_name)
+                    if v2_leftover is not None:
+                        await qdrant_delete(client, f"/collections/{v2_name}")
+                        print(f"  ロールバック後クリーンアップ: {v2_name} を削除")
 
                 except Exception as rollback_err:
                     print(f"  *** ロールバック失敗: {rollback_err}")
@@ -492,21 +550,21 @@ async def migrate_collection(
             print(f"  [DRY-RUN] 全ステップ完了 (変更なし)")
             print(f"  サマリー:")
             print(f"    元ポイント数: {original_count}")
-            print(f"    sparse 生成: {sparse_generated}")
-            print(f"    sparse 空: {sparse_empty}")
+            print(f"    sparse 生成: {upsert_stats['sparse_generated']}")
+            print(f"    sparse 空: {upsert_stats['sparse_empty']}")
         else:
             final_count = await get_points_count(client, name)
             final_info = await get_collection_info(client, name)
             final_sparse = final_info.get("config", {}).get("params", {}).get("sparse_vectors", {})
 
-            if final_count != len(all_points):
-                print(f"  エラー: 最終ポイント数不一致 (最終: {final_count}, 元: {len(all_points)})")
+            if final_count != total_processed:
+                print(f"  エラー: 最終ポイント数不一致 (最終: {final_count}, 元: {total_processed})")
                 print(f"  復旧: {old_name} からリストアしてください")
                 return False
 
-            print(f"  ポイント数: {final_count} (元: {len(all_points)})")
+            print(f"  ポイント数: {final_count} (元: {total_processed})")
             print(f"  sparse_vectors: {final_sparse}")
-            print(f"  sparse 生成: {sparse_generated}, 空: {sparse_empty}")
+            print(f"  sparse 生成: {upsert_stats['sparse_generated']}, 空: {upsert_stats['sparse_empty']}")
             print(f"  バックアップ: {old_name} に保持 (手動削除してください)")
 
     print(f"\n完了: {name} のマイグレーション {'(DRY-RUN)' if dry_run else '成功'}")
@@ -523,16 +581,23 @@ async def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--collection", type=str, help="マイグレーション対象のコレクション名")
     group.add_argument("--all-dept", action="store_true", help="全 dept_* コレクションをマイグレーション")
-    parser.add_argument("--batch-size", type=int, default=100, help="バッチサイズ (デフォルト: 100)")
+    parser.add_argument("--batch-size", type=int, default=100, help="バッチサイズ (デフォルト: 100, 上限: 500)")
     parser.add_argument("--dry-run", action="store_true", help="変更を加えずにシミュレーション")
+    parser.add_argument("--wait-timeout", type=int, default=300, help="indexing 待機タイムアウト秒 (デフォルト: 300)")
 
     args = parser.parse_args()
+
+    # P3: batch-size クランプ
+    batch_size = max(1, min(args.batch_size, MAX_BATCH_SIZE))
+    if batch_size != args.batch_size:
+        print(f"注意: batch-size を {args.batch_size} -> {batch_size} にクランプしました (範囲: 1-{MAX_BATCH_SIZE})")
 
     print("=" * 60)
     print("Qdrant Sparse Vector マイグレーション")
     print("=" * 60)
     print(f"Qdrant URL: {QDRANT_URL}")
-    print(f"バッチサイズ: {args.batch_size}")
+    print(f"バッチサイズ: {batch_size}")
+    print(f"indexing タイムアウト: {args.wait_timeout}秒")
     print(f"モード: {'DRY-RUN (変更なし)' if args.dry_run else '本番実行'}")
     print(f"日時: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -547,7 +612,7 @@ async def main():
 
     for coll in collections:
         try:
-            success = await migrate_collection(coll, args.batch_size, args.dry_run)
+            success = await migrate_collection(coll, batch_size, args.dry_run, args.wait_timeout)
             results[coll] = success
         except Exception as e:
             print(f"\nエラー: {coll} のマイグレーション中に例外: {e}")
