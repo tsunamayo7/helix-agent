@@ -384,39 +384,106 @@ async def migrate_collection(
             print(f"  backup 検証 OK: {old_count} ポイント")
 
         # ── Step 8: リネーム (元を削除 + v2 を元の名前で再作成) ──
+        # 安全弁: 中断時に {name}_old から自動ロールバック
         print(f"\n[8/9] リネーム: {name} 削除 -> {v2_name} を {name} に")
+        print(f"  安全弁: 失敗時は {old_name} から自動ロールバックします")
 
         if dry_run:
             print(f"  [DRY-RUN] {name} を削除し、{v2_name} のデータで {name} を再作成")
+            print(f"  [DRY-RUN] 失敗時ロールバック: {old_name} -> {name} にデータ復元")
         else:
-            # 元コレクションを削除
-            await qdrant_delete(client, f"/collections/{name}")
-            print(f"  {name} 削除完了")
+            try:
+                # 元コレクションを削除
+                await qdrant_delete(client, f"/collections/{name}")
+                print(f"  {name} 削除完了")
 
-            # v2 のデータで元の名前のコレクションを作成
-            await qdrant_put(client, f"/collections/{name}", v2_config)
-            print(f"  {name} (named vectors + sparse) 作成完了")
+                # v2 のデータで元の名前のコレクションを作成
+                await qdrant_put(client, f"/collections/{name}", v2_config)
+                print(f"  {name} (named vectors + sparse) 作成完了")
 
-            # v2 から新しい name にデータコピー
-            print(f"  {v2_name} -> {name} にデータコピー中...")
-            v2_points = await scroll_all_points(client, v2_name, batch_size, upserted)
+                # v2 から新しい name にデータコピー
+                print(f"  {v2_name} -> {name} にデータコピー中...")
+                v2_points = await scroll_all_points(client, v2_name, batch_size, upserted)
 
-            for batch_start in range(0, len(v2_points), batch_size):
-                batch = v2_points[batch_start : batch_start + batch_size]
-                copy_points = []
-                for point in batch:
-                    copy_points.append({
-                        "id": point["id"],
-                        "vector": point.get("vector", {}),
-                        "payload": point.get("payload", {}),
-                    })
-                await qdrant_put(client, f"/collections/{name}/points", {"points": copy_points})
-                done = min(batch_start + batch_size, len(v2_points))
-                print(f"  copy: {done}/{len(v2_points)} ポイント")
+                for batch_start in range(0, len(v2_points), batch_size):
+                    batch = v2_points[batch_start : batch_start + batch_size]
+                    copy_points = []
+                    for point in batch:
+                        copy_points.append({
+                            "id": point["id"],
+                            "vector": point.get("vector", {}),
+                            "payload": point.get("payload", {}),
+                        })
+                    await qdrant_put(client, f"/collections/{name}/points", {"points": copy_points})
+                    done = min(batch_start + batch_size, len(v2_points))
+                    print(f"  copy: {done}/{len(v2_points)} ポイント")
 
-            # v2 コレクションを削除
-            await qdrant_delete(client, f"/collections/{v2_name}")
-            print(f"  {v2_name} 削除完了")
+                # v2 コレクションを削除
+                await qdrant_delete(client, f"/collections/{v2_name}")
+                print(f"  {v2_name} 削除完了")
+
+            except Exception as step8_err:
+                print(f"\n  *** Step 8 エラー: {step8_err}")
+                print(f"  *** {old_name} から自動ロールバックを開始します...")
+
+                try:
+                    # ロールバック: {name} が存在しない場合は作成する
+                    live_info = await get_collection_info(client, name)
+                    if live_info is not None:
+                        # 中途半端な状態のコレクションを削除
+                        await qdrant_delete(client, f"/collections/{name}")
+                        print(f"  ロールバック: 中途半端な {name} を削除")
+
+                    # 元の形式でコレクションを再作成
+                    restore_config: dict = {
+                        "vectors": vectors_config,
+                    }
+                    if sparse_config:
+                        restore_config["sparse_vectors"] = sparse_config
+                    await qdrant_put(client, f"/collections/{name}", restore_config)
+                    print(f"  ロールバック: {name} を再作成")
+
+                    # {name}_old から全ポイントを読み取り
+                    old_points = await scroll_all_points(client, old_name, batch_size, len(all_points))
+                    print(f"  ロールバック: {old_name} から {len(old_points)} ポイント読み取り")
+
+                    # {name} にデータを復元
+                    for batch_start in range(0, len(old_points), batch_size):
+                        batch = old_points[batch_start : batch_start + batch_size]
+                        restore_points = []
+                        for point in batch:
+                            restore_points.append({
+                                "id": point["id"],
+                                "vector": point.get("vector", []),
+                                "payload": point.get("payload", {}),
+                            })
+                        await qdrant_put(client, f"/collections/{name}/points", {"points": restore_points})
+                        done = min(batch_start + batch_size, len(old_points))
+                        print(f"  restore: {done}/{len(old_points)} ポイント")
+
+                    # 復元後のポイント数検証
+                    for attempt in range(10):
+                        restored_count = await get_points_count(client, name)
+                        if restored_count >= len(all_points):
+                            break
+                        await asyncio.sleep(1)
+
+                    restored_count = await get_points_count(client, name)
+                    if restored_count == len(all_points):
+                        print(f"  *** ロールバック成功: {name} を {restored_count} ポイントで復元")
+                        print(f"  *** {v2_name} は手動確認用に残しています")
+                    else:
+                        print(f"  *** ロールバック警告: ポイント数不一致 (復元: {restored_count}, 元: {len(all_points)})")
+                        print(f"  *** {old_name} のデータは保持されています。手動リストアしてください")
+
+                except Exception as rollback_err:
+                    print(f"  *** ロールバック失敗: {rollback_err}")
+                    print(f"  *** 手動復旧が必要です:")
+                    print(f"  ***   1. {old_name} のデータを確認")
+                    print(f"  ***   2. {old_name} -> {name} にデータをコピー")
+                    print(f"  ***   3. {v2_name} は参照用に残っています")
+
+                return False
 
         # ── Step 9: 最終検証 ──
         print(f"\n[9/9] 最終検証")
