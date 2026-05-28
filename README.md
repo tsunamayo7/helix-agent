@@ -1,58 +1,41 @@
 # helix-agent
 
-**Cut Claude Code token usage 82-97% with local LLMs.**
+**MCP server that cuts Claude Code token usage by 82-97% using local LLMs.**
 
-![Demo](demo.gif)
+![Demo](docs/demo.gif)
 
+[![GitHub Stars](https://img.shields.io/github/stars/tsunamayo7/helix-agent?style=social)](https://github.com/tsunamayo7/helix-agent)
 [![CI](https://github.com/tsunamayo7/helix-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/tsunamayo7/helix-agent/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/tsunamayo7/helix-agent/actions/workflows/codeql.yml/badge.svg)](https://github.com/tsunamayo7/helix-agent/actions/workflows/codeql.yml)
-[![Tests](https://img.shields.io/badge/tests-367%20passing-brightgreen.svg)](#)
-[![v0.15.1](https://img.shields.io/badge/version-0.15.1-7c3aed.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-471%20passing-brightgreen.svg)](#testing)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-compatible-10b981.svg)](https://modelcontextprotocol.io)
-[![Works on 8GB VRAM](https://img.shields.io/badge/GPU-8GB%20VRAM%20OK-green.svg)](#gpu-auto-detection)
 
 ## The Problem
 
-Claude Code's Max plan quota [can vanish in 19 minutes](https://www.macrumors.com/2026/03/26/claude-code-users-rapid-rate-limit-drain-bug/). A single screenshot costs ~15,000 tokens; one DOM snapshot costs ~114,000. Retry loops burn tokens infinitely with [no built-in detection](https://github.com/anthropics/claude-code/issues/41659) -- the [#1 pain point](https://github.com/anthropics/claude-code/issues/16157) (666+ upvotes).
-
-## The Solution
-
-helix-agent is an MCP server that compresses screenshots, DOM, and browser output through your local GPU before Claude sees them -- and detects retry loops before they drain your quota. Connect it to Claude Code and savings happen automatically; no workflow changes needed.
-
-## Measured Results
-
-| What | Without | With helix-agent | Reduction |
-|---|---|---|---|
-| Screenshot analysis | ~15,000 tokens | ~400 tokens | **97%** |
-| DOM/HTML processing | ~114,000 tokens | ~500 tokens | **99%** |
-| Browser automation | ~15,000 tokens/action | ~1,000-2,700 | **82-93%** |
-| Retry loops | Infinite (until quota dies) | Stopped at 3rd repeat | **100%** |
-| Routine tasks | Opus tokens ($$$) | Local LLM ($0) | **100%** |
-
-All compression runs on your local GPU via Ollama. Zero cloud API cost.
+Claude Code burns tokens on things that don't need a frontier model. A single screenshot costs **~15,000 tokens**. One DOM snapshot costs **~114,000 tokens**. Retry loops repeat failing calls until your quota is gone — the [#1 reported pain point](https://github.com/anthropics/claude-code/issues/16157) (600+ upvotes), with [no built-in fix](https://github.com/anthropics/claude-code/issues/41659).
 
 ## Before / After
 
 | | Without helix-agent | With helix-agent |
 |---|---|---|
-| Screenshot | 15,000 tokens raw image | 400 tokens structured text |
-| DOM snapshot | 114,000 tokens raw HTML | 500 tokens action summary |
-| Retry loop | Runs until quota dies | Stopped at 3rd repeat |
-| Routine task | Opus ($$$) | Local Ollama ($0) |
-| Cloud API cost | $50-200/month in waste | **$0** |
+| Screenshot | 15,000 tokens (raw image) | **400 tokens** (structured text) |
+| DOM snapshot | 114,000 tokens (raw HTML) | **500 tokens** (action summary) |
+| Retry loop | Runs until quota dies | **Stopped at 3rd repeat** |
+| Reasoning task | Opus tokens | **$0** (local Ollama) |
 
 ## Quick Start
+
+**1. Install and run:**
 
 ```bash
 git clone https://github.com/tsunamayo7/helix-agent.git
 cd helix-agent && uv sync
-ollama pull gemma4:e2b          # 8GB GPU (or e4b/26b/31b for larger)
-uv run python server.py
+ollama pull gemma4:e2b    # 8GB VRAM minimum
 ```
 
-Add to `~/.claude/settings.json`:
+**2. Add to Claude Code** (`~/.claude/settings.json`):
 
 ```json
 {
@@ -65,172 +48,153 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-Restart Claude Code. Done.
+**3. Restart Claude Code.** Token savings happen automatically — no workflow changes needed.
 
-> **$0 cloud cost.** All compression, retry detection, and delegation runs on your local GPU via Ollama. No API keys, no subscriptions, no metered billing. Your tokens stay on your machine.
+## Measured Results
 
-## How It Works
-
-```
-Claude Code (Opus)
-    |
-    +-- helix-agent (MCP server)
-           |
-           +-- vision_compress ---- Local LLM ----> ~400 tokens  (was 15,000)
-           +-- dom_compress ------- Local LLM ----> ~500 tokens  (was 114,000)
-           +-- retry_guard -------- Pure logic ----> Loop stopped (sub-ms)
-           +-- think / agent_task - Local LLM ----> $0 reasoning
-           +-- computer_use ------- agent-browser -> 82-93% saved
-           +-- code_review -------- 4-layer LLM --> $0.20 total
-```
-
-## Works Everywhere
-
-| Platform | GPU | Status |
-|---|---|---|
-| macOS (Apple Silicon) | Metal / M1-M4 | Tested daily |
-| Linux | NVIDIA CUDA | Primary dev environment |
-| Windows (WSL2) | NVIDIA CUDA | Supported via Ollama |
-| Windows (native) | NVIDIA CUDA | Supported via Ollama |
-| CPU-only | None | Works (slower, ~30s per compress) |
-
-Anywhere Ollama runs, helix-agent runs. 8GB VRAM minimum for GPU acceleration.
-
-## Features
-
-- **Vision Compress** -- Screenshot to structured text via local vision LLM. 15,000 tokens to 400.
-- **DOM Compress** -- HTML/DOM to structured extract via local LLM. 114,000 tokens to 500.
-- **Retry Guard** -- Detects identical tool calls before they loop. Sub-millisecond, no LLM needed.
-- **GPU Auto-Detection** -- Detects your GPU at startup, selects the optimal model from 8GB to 96GB+.
-
-<details>
-<summary>All 27 tools</summary>
-
-- **Browser Automation** -- Routes through agent-browser (Rust/CDP) with Playwright fallback. Native keyboard events fix React controlled components.
-- **4-Layer Code Review** -- gemma4 + Sonnet + Opus + Codex pipeline catches all issues at ~$0.20.
-- **Self-Evolving Memory** -- Reviews conversations every 5 turns, saves reusable skills as SKILL.md files. Gets smarter over time, all local.
-- **Parallel Tasks** -- Run multiple tasks simultaneously with 2-axis model routing (task type x input size).
-- **ReAct Agents** -- Local LLM delegation with tool access, sub-agents, background workers, and JSONL tracing.
-
-</details>
-
-## Security: PathGuard
-
-MCP tools that delegate to local LLMs can be tricked into accessing sensitive files. PathGuard prevents this with strict path allowlists -- delegated tools can only read/write directories you explicitly permit.
-
-Defends against [CVE-2025-59536](https://research.checkpoint.com/2026/rce-and-api-token-exfiltration-through-claude-code-project-files-cve-2025-59536/) (RCE and API token exfiltration through Claude Code project files).
-
-```python
-# PathGuard blocks unauthorized access automatically
-HELIX_ALLOWED_PATHS=/home/user/projects,/tmp
-```
-
-## Real-World Usage
-
-helix-agent runs in production daily on the author's own Claude Code workflow:
-
-- **367 tests** passing (pytest, all Ollama calls mocked)
-- **17+ hour autonomous sessions** with retry guard preventing quota drain
-- **27 MCP tools** + 3 Resources + 3 Prompts -- full MCP spec coverage
-- Used to build [helix-pilot](https://github.com/tsunamayo7/helix-pilot), [helix-codex](https://github.com/tsunamayo7/claude-code-codex-agents), and itself (dogfooding)
-
-## GPU Auto-Detection
-
-helix-agent auto-selects the best model for your hardware:
-
-| Your GPU | VRAM | Model | Compress Speed |
+| Operation | Before | After | Reduction |
 |---|---|---|---|
-| RTX 4060 | 8GB | gemma4:e2b | **10.2s** |
-| RTX 4070 Ti | 16GB | gemma4:e4b | **11.8s** |
-| RTX 4090 / 3090 | 24GB | gemma4:26b | **14.7s** |
-| RTX PRO 6000 | 48GB+ | gemma4:31b | 27.5s |
+| Screenshot analysis | ~15,000 tokens | ~400 tokens | **97%** |
+| DOM/HTML processing | ~114,000 tokens | ~500 tokens | **99.6%** |
+| Browser automation | ~15,000 tokens/action | ~1,000-2,700 | **82-93%** |
+| Retry loops | Infinite | Stopped at 3rd repeat | **100%** |
+| Reasoning / summaries | Opus ($$$) | Local LLM | **$0** |
 
-gemma4:e2b on 8GB runs **2.7x faster** than 31b with comparable compression quality. No expensive GPU required.
+All compression runs on your local GPU via [Ollama](https://ollama.ai/). Zero cloud API cost.
 
-## Vision Pipeline
+## Key Features
+
+- **vision_compress** — Screenshots to structured text via local vision LLM. 15,000 → 400 tokens (97% reduction).
+- **dom_compress** — HTML/DOM to action summaries via local LLM. 114,000 → 500 tokens (99.6% reduction).
+- **retry_guard** — Detects identical tool calls and stops loops at the 3rd repeat. Sub-millisecond, no LLM needed.
+- **think / agent_task** — Delegate reasoning, analysis, and multi-step tasks to local Ollama at $0.
+- **SecurityMiddleware** — Deny-by-default policy on every MCP tool call. JSONL audit trail.
+- **GPU auto-detection** — Selects the optimal model for your hardware, from 8GB to 96GB+ VRAM.
+- **Self-evolving memory** — Auto-extracts reusable skills from conversations. Qdrant hybrid search (dense + sparse vectors).
+
+## Architecture
 
 ```
-+--------------+     +-----------------+     +--------------+
-| Screenshot   |---->| vision_compress |---->| ~400 tokens  |
-| (15K tokens) |     | (local gemma4)  |     | (text only)  |
-+--------------+     +-----------------+     +--------------+
-
-+--------------+     +-----------------+     +--------------+
-| DOM / HTML   |---->| dom_compress    |---->| ~500 tokens  |
-| (114K tokens)|     | (local gemma4)  |     | (text only)  |
-+--------------+     +-----------------+     +--------------+
+Claude Code (Opus/Sonnet)
+    │
+    └── helix-agent (MCP server, FastMCP)
+            │
+            ├── SecurityMiddleware ── deny-by-default policy check
+            │
+            ├── vision_compress ──── local VLM (gemma4) ──→  ~400 tokens (was 15,000)
+            ├── dom_compress ─────── local LLM (gemma4) ──→  ~500 tokens (was 114,000)
+            ├── retry_guard ──────── pure logic ───────────→  loop stopped (sub-ms)
+            ├── think ────────────── local LLM (gemma4) ──→  $0 reasoning
+            ├── agent_task ───────── ReAct loop + tools ──→  $0 multi-step
+            ├── computer_use ─────── CDP / Playwright ────→  82-93% saved
+            ├── code_review ──────── 4-layer pipeline ────→  ~$0.20 total
+            │
+            ├── Qdrant (optional) ── hybrid search (dense + sparse vectors)
+            └── Langfuse (optional)─ OTLP tracing
 ```
 
-Real measurement (RTX PRO 6000):
-```
-Input:  1920x1048 screenshot of X.com (~15,000 tokens)
-Output: "X home feed, Japanese UI, 'For You' tab active..." (~400 tokens)
-Saved:  7,362 tokens in one call
-```
+## MCP Coverage
 
-## 4-Layer Code Review
-
-Automated multi-LLM review at ~$0.20 total:
-
-| Layer | Reviewer | Findings | Cost |
-|---|---|---|---|
-| 1 | gemma4 + RAG (local) | 7 | **$0** |
-| 2 | Sonnet 4.7 | 14 | ~$0.13 |
-| 3 | Opus 4.7 (summary only) | 16 | ~$0.03 |
-| 4 | Codex (P1 only, on-demand) | 5 | ~$0.33 |
-| **Combined** | | **16+** | **~$0.20** |
-
-gemma4 + RAG ($0) outperforms Codex GPT-5.3 (~$0.33) in code review findings.
-
-## What Nothing Else Does
-
-| Capability | helix-agent | Alternatives |
-|---|---|---|
-| Screenshot to text (97% cut) | Local vision LLM | No MCP server does this |
-| DOM to text (99% cut) | Local LLM | Playwright MCP sends raw DOM |
-| Retry loop detection | Sub-ms, no LLM | No built-in Claude Code detection |
-| GPU auto-detect + model select | 8GB to 96GB+ | Manual config required |
-| Self-evolving memory | SKILL.md + Qdrant | Unique to helix-agent |
-| All 3 MCP primitives | 27 Tools + 3 Resources + 3 Prompts | Most MCPs implement Tools only |
-
-## MCP Architecture
-
-27 tools organized by function:
+28 tools, 3 resources, 3 prompts — full MCP spec coverage.
 
 | Category | Tools |
 |---|---|
 | Token saving | `vision_compress`, `dom_compress` |
 | Loop prevention | `retry_guard_check`, `retry_guard_status`, `retry_guard_reset` |
 | Local delegation | `think`, `agent_task`, `fork_task`, `parallel_tasks` |
-| Vision & browser | `see`, `browse`, `computer_use` |
+| Browser & vision | `see`, `browse`, `computer_use` |
 | Background agents | `spawn_agent`, `send_agent_input`, `wait_agent`, `list_agents`, `close_agent` |
-| Memory | `evolving_memory_review`, `list_learned_skills`, `get_skill`, `dept_search`, `dept_store` |
-| Code quality | `code_review` |
-| Meta | `providers`, `models`, `config`, `agent_types` |
+| Memory & learning | `evolving_memory_review`, `list_learned_skills`, `get_skill`, `dept_search`, `dept_store` |
+| Code quality | `code_review`, `x_search` |
+| Infrastructure | `providers`, `models`, `config`, `agent_types` |
 
-Plus 3 Resources (`helix://status`, `helix://models`, `helix://config`) and 3 Prompts (`retry_report`, `optimize_tokens`, `setup_guide`).
+Resources: `helix://status`, `helix://models`, `helix://config`
+Prompts: `retry_report`, `optimize_tokens`, `setup_guide`
+
+## Benchmarks
+
+### Token Compression
+
+```
+Input:  1920x1048 screenshot (X.com, Japanese UI)
+Before: ~15,000 tokens (raw image sent to Claude)
+After:  ~400 tokens ("X home feed, 'For You' tab active, 3 posts visible...")
+Saved:  14,600 tokens per screenshot
+```
+
+### GPU Speed
+
+| GPU | VRAM | Model | Compress Speed |
+|---|---|---|---|
+| RTX 4060 / M1 8GB | 8GB | gemma4:e2b | **10.2s** |
+| RTX 4070 Ti / M2 Pro | 16GB | gemma4:e4b | **11.8s** |
+| RTX 4090 / M4 Max | 24GB+ | gemma4:26b | **14.7s** |
+| RTX PRO 6000 | 48GB+ | gemma4:31b | 27.5s |
+
+gemma4:e2b on 8GB VRAM runs **2.7x faster** than 31b with comparable compression quality.
+
+### 4-Layer Code Review
+
+| Layer | Model | Cost |
+|---|---|---|
+| 1 | gemma4 + RAG (local) | **$0** |
+| 2 | Sonnet 4 | ~$0.13 |
+| 3 | Opus 4 (summary) | ~$0.03 |
+| 4 | Codex (P1 escalation) | ~$0.33 |
+| **Total** | | **~$0.20** |
+
+## Security
+
+### SecurityMiddleware (deny-by-default)
+
+Every MCP tool call passes through SecurityMiddleware before execution. Unknown tools are denied by default. Risk levels (LOW / MEDIUM / HIGH) are assigned per tool with parameter-aware rules.
+
+```python
+# Enforced automatically via FastMCP Middleware
+allowed, reason = check_tool_permission("computer_use", {"action": "click"})
+# HIGH risk actions return a structured warning instead of executing
+```
+
+### PathGuard
+
+Delegated tools can only read/write directories you explicitly permit. Defends against [CVE-2025-59536](https://research.checkpoint.com/2026/rce-and-api-token-exfiltration-through-claude-code-project-files-cve-2025-59536/) (RCE via Claude Code project files).
+
+```bash
+HELIX_ALLOWED_PATHS=/home/user/projects,/tmp
+```
+
+## Platform Support
+
+| Platform | GPU | Status |
+|---|---|---|
+| macOS (Apple Silicon) | Metal / M1-M4 | Tested daily |
+| Linux | NVIDIA CUDA | Primary dev environment |
+| Windows (WSL2 / native) | NVIDIA CUDA | Supported via Ollama |
+| CPU-only | None | Works (slower) |
+
+Anywhere Ollama runs, helix-agent runs.
 
 ## Configuration
 
-helix-agent works with zero configuration. For advanced setups:
+Zero configuration required. All settings have sensible defaults.
 
 ```bash
 # Environment variables (all optional)
-OLLAMA_HOST=http://localhost:11434   # Ollama endpoint
-HELIX_PROVIDER=ollama               # LLM provider
-HELIX_LOG_LEVEL=INFO                # Logging level
+OLLAMA_HOST=http://localhost:11434    # Ollama endpoint
+HELIX_ALLOWED_PATHS=/home/user/code  # PathGuard allowlist
+HELIX_LOG_LEVEL=INFO                 # Logging verbosity
 ```
 
-Optional dependencies:
-- [Qdrant](https://qdrant.tech/) -- shared memory across sessions
-- [Playwright](https://playwright.dev/) -- browser automation fallback
-- [agent-browser](https://github.com/vercel-labs/agent-browser) -- recommended for 82-93% browser token savings
+Optional integrations:
+- [Qdrant](https://qdrant.tech/) — persistent memory with hybrid search (dense + sparse vectors)
+- [Langfuse](https://langfuse.com/) — OTLP tracing for tool call observability
+- [Playwright](https://playwright.dev/) — browser automation fallback
 
 ## Requirements
 
 - Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
-- [Ollama](https://ollama.ai/) + any Gemma 4 model:
+- [uv](https://docs.astral.sh/uv/) (package manager)
+- [Ollama](https://ollama.ai/) with a Gemma 4 model:
 
 | GPU VRAM | Command | Model Size |
 |---|---|---|
@@ -239,20 +203,41 @@ Optional dependencies:
 | 24GB | `ollama pull gemma4:26b` | 12GB |
 | 48GB+ | `ollama pull gemma4:31b` | 20GB |
 
+## Testing
+
+471 tests, all passing. Ollama calls are fully mocked — no GPU required to run the test suite.
+
+```bash
+uv run pytest tests/ -q          # Run all tests
+uv run pytest tests/ --cov=src   # With coverage
+uv run ruff check src/ tests/    # Linting
+```
+
+## How It Compares
+
+| Capability | helix-agent | Alternatives |
+|---|---|---|
+| Screenshot → text (97% reduction) | Local vision LLM | No MCP server does this |
+| DOM → text (99.6% reduction) | Local LLM | Playwright MCP sends raw DOM |
+| Retry loop detection | Sub-ms, no LLM | No built-in Claude Code detection |
+| GPU auto-detection | 8GB to 96GB+ | Manual config elsewhere |
+| Deny-by-default security | SecurityMiddleware + PathGuard | Most MCPs have no security layer |
+| Self-evolving memory | Skills + Qdrant hybrid search | Unique to helix-agent |
+| Full MCP spec | 28 Tools + 3 Resources + 3 Prompts | Most MCPs implement Tools only |
+
 ## Related Projects
 
-- [helix-pilot](https://github.com/tsunamayo7/helix-pilot) -- GUI automation MCP server
-- [claude-code-codex-agents](https://github.com/tsunamayo7/claude-code-codex-agents) -- MCP bridge to Codex CLI
-- [helix-sandbox](https://github.com/tsunamayo7/helix-sandbox) -- Secure sandbox MCP server
+- [helix-pilot](https://github.com/tsunamayo7/helix-pilot) — GUI automation MCP server
+- [claude-code-codex-agents](https://github.com/tsunamayo7/claude-code-codex-agents) — MCP bridge to Codex CLI
 
 ## Not a Claude Code Wrapper
 
-helix-agent is an MCP server that Claude Code connects to. It does not wrap, proxy, or re-host Claude Code or the Anthropic API. Fully compliant with Anthropic's Terms of Service.
+helix-agent is a standard MCP server that Claude Code connects to. It does not wrap, proxy, or re-host Claude Code or the Anthropic API.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Issues and PRs welcome.
 
 ## License
 
-MIT
+[MIT](LICENSE)
